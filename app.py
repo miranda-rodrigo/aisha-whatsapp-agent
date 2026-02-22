@@ -10,6 +10,7 @@ from config import (
     WEBHOOK_VERIFY_TOKEN,
     WHATSAPP_TOKEN,
 )
+from refine import refine_transcription
 from transcribe import transcribe_audio_bytes
 
 logging.basicConfig(
@@ -45,7 +46,7 @@ async def verify_webhook(
     """Meta sends a GET to verify the webhook on setup."""
     if hub_mode == "subscribe" and hub_verify_token == WEBHOOK_VERIFY_TOKEN:
         log.info("Webhook verified")
-        return int(hub_challenge)
+        return int(hub_challenge) if hub_challenge.isdigit() else hub_challenge
     log.warning("Webhook verification failed: bad token")
     return {"error": "invalid verify token"}, 403
 
@@ -100,8 +101,11 @@ async def handle_audio(sender: str, message: dict):
     log.info(f"Audio downloaded: {len(audio_bytes)} bytes, mime={mime_type}")
 
     try:
-        text = await transcribe_audio_bytes(audio_bytes, mime_type)
-        reply = f"📝 Transcrição:\n\n{text}"
+        raw_text = await transcribe_audio_bytes(audio_bytes, mime_type)
+        log.info(f"Raw transcription: {len(raw_text)} chars")
+        refined_text = await refine_transcription(raw_text)
+        log.info(f"Refined transcription: {len(refined_text)} chars")
+        reply = f"📝 Transcrição:\n\n{refined_text}"
     except Exception as e:
         log.exception("Transcription failed")
         reply = f"Erro na transcrição: {e}"

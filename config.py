@@ -1,7 +1,15 @@
 import os
+import sys
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=False)
+
+REQUIRED = ["WHATSAPP_TOKEN", "WHATSAPP_PHONE_ID", "WEBHOOK_VERIFY_TOKEN", "OPENAI_API_KEY"]
+missing = [v for v in REQUIRED if v not in os.environ]
+if missing:
+    print(f"FATAL: Missing env vars: {missing}", file=sys.stderr)
+    print(f"Available env vars: {sorted(os.environ.keys())}", file=sys.stderr)
+    sys.exit(1)
 
 WHATSAPP_TOKEN = os.environ["WHATSAPP_TOKEN"]
 WHATSAPP_PHONE_ID = os.environ["WHATSAPP_PHONE_ID"]
