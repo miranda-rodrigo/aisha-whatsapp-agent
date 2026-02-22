@@ -99,6 +99,7 @@ async def handle_audio(sender: str, message: dict):
     mime_type = message["audio"].get("mime_type", "audio/ogg")
 
     log.info(f"Audio downloaded: {len(audio_bytes)} bytes, mime={mime_type}")
+    await send_message(sender, "⏳ Transcrevendo...")
 
     try:
         raw_text = await transcribe_audio_bytes(audio_bytes, mime_type)
