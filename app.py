@@ -20,6 +20,8 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 http_client: httpx.AsyncClient
+processed_messages: set[str] = set()
+MAX_PROCESSED_CACHE = 1000
 
 
 @asynccontextmanager
@@ -61,13 +63,24 @@ async def receive_webhook(request: Request):
         entry = body["entry"][0]
         changes = entry["changes"][0]
         value = changes["value"]
-        message = value["messages"][0]
+        messages = value.get("messages")
+        if not messages:
+            return {"status": "no message"}
+        message = messages[0]
     except (KeyError, IndexError):
         return {"status": "no message"}
 
+    msg_id = message.get("id", "")
+    if msg_id in processed_messages:
+        log.info(f"Duplicate message {msg_id}, skipping")
+        return {"status": "duplicate"}
+    processed_messages.add(msg_id)
+    if len(processed_messages) > MAX_PROCESSED_CACHE:
+        processed_messages.clear()
+
     sender = message.get("from", "")
     msg_type = message.get("type", "")
-    log.info(f"Message from {sender}, type={msg_type}")
+    log.info(f"Message from {sender}, type={msg_type}, id={msg_id}")
 
     if sender not in ALLOWED_NUMBERS:
         log.info(f"Ignored: {sender} not in allowed list")
