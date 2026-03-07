@@ -119,12 +119,11 @@ async def handle_audio(sender: str, message: dict):
         log.info(f"Raw transcription: {len(raw_text)} chars")
         refined_text = await refine_transcription(raw_text)
         log.info(f"Refined transcription: {len(refined_text)} chars")
-        reply = f"📝 Transcrição:\n\n{refined_text}"
+        await send_message(sender, "📝 Transcrição:")
+        await send_message(sender, refined_text)
     except Exception as e:
         log.exception("Transcription failed")
-        reply = f"Erro na transcrição: {e}"
-
-    await send_message(sender, reply)
+        await send_message(sender, f"Erro na transcrição: {e}")
 
 
 async def send_message(to: str, text: str):
