@@ -1,6 +1,6 @@
 # Aisha — Assistente Pessoal via WhatsApp
 
-Aisha é uma assistente pessoal inteligente que roda no WhatsApp Business API. Ela conversa, transcreve áudios, pesquisa na web, gera imagens, cria lembretes, analisa documentos, entende vídeos do YouTube e mantém contexto de conversa — tudo pelo WhatsApp.
+Aisha é uma assistente pessoal inteligente que roda no WhatsApp Business API. Ela conversa, transcreve áudios, pesquisa na web, gera imagens, cria lembretes, agenda tarefas recorrentes, analisa documentos, entende vídeos do YouTube e mantém contexto de conversa — tudo pelo WhatsApp.
 
 ## Funcionalidades
 
@@ -22,8 +22,8 @@ Aisha é uma assistente pessoal inteligente que roda no WhatsApp Business API. E
 ### Personalização e Perfil
 - **Contexto pessoal:** envie informações sobre você e a Aisha lembra para sempre
 - **Idioma:** peça para mudar o idioma da conversa ("vamos falar em inglês")
-- **O que você sabe de mim?** A Aisha lista: contexto pessoal, lembretes ativos, preferências e estatísticas de uso
-- Estatísticas rastreadas: áudios, imagens, documentos, vídeos YouTube, lembretes criados
+- **O que você sabe de mim?** A Aisha lista: contexto pessoal, lembretes ativos, tarefas agendadas, preferências e estatísticas de uso
+- Estatísticas rastreadas: áudios, imagens, documentos, vídeos YouTube, lembretes criados, tarefas agendadas criadas
 
 ### Transcrição de Áudio
 - Áudios enviados **sem** mencionar "Aisha" são transcritos com Whisper e refinados com GPT-4o-mini
@@ -95,6 +95,28 @@ Aisha é uma assistente pessoal inteligente que roda no WhatsApp Business API. E
 → ✅ Lembrete atualizado para 09/03 às 11:00
 ```
 
+### Tarefas Agendadas (Scheduled Tasks)
+- Diferente dos lembretes (que enviam texto fixo), as tarefas agendadas **executam uma ação do agente** a cada disparo
+- Cada execução usa `gpt-5.4` com busca na web para informações atualizadas
+- Suporte a agendamento via cron: diário, semanal, mensal, dias específicos
+- Gerenciamento completo: criar, listar e cancelar tarefas
+- Jobs persistem no banco e são restaurados automaticamente no startup do servidor
+
+**Exemplos:**
+```
+"toda segunda me mande um relatório com as últimas notícias sobre o Irã"
+→ ✅ Tarefa agendada criada! (cron: toda segunda às 09:00)
+
+"todo dia às 7h me mande o resumo do mercado financeiro"
+→ ✅ Tarefa agendada criada! (cron: todo dia às 07:00)
+
+"quais são minhas tarefas agendadas?"
+→ 📋 1. Relatório Irã — 0 9 * * 1
+
+"cancela a tarefa agendada 1"
+→ ✅ Tarefa agendada cancelada
+```
+
 ## Fluxo de Mensagens
 
 ```
@@ -129,13 +151,18 @@ handle_chat (texto)
         │                                   │
         │                                   └── SIMPLE/COMPLEX
         │                                         │
-        ├── 7. menciona lembrete? ────────────────┤──► reminder
+        ├── 7. tarefa agendada? ──────────────────┤──► scheduled_task
+        │       ├── criar ──► Supabase + APScheduler (CronTrigger)
+        │       ├── listar ──► lista do Supabase
+        │       └── cancelar ──► desativa no Supabase + remove do APScheduler
+        │
+        ├── 8. menciona lembrete? ────────────────┤──► reminder
         │       ├── criar ──► Supabase + APScheduler + link GCal
         │       ├── listar ──► lista do Supabase
         │       ├── cancelar ──► remove do Supabase + APScheduler
         │       └── editar ──► atualiza Supabase + APScheduler
         │
-        └── 8. conversa normal
+        └── 9. conversa normal
                     ├── SIMPLE ──► gpt-4.1
                     └── COMPLEX ──► gpt-5.4 (web search, image gen)
 ```
@@ -165,6 +192,8 @@ whatsapp-agent/
 │       ├── chat.py             # Chat: classificador + gpt-4.1 + gpt-5.4 + auto-consciência
 │       ├── reminder.py         # Lembretes: parsing LLM, agendamento, Google Calendar
 │       ├── reminder_store.py   # CRUD Supabase para tabela reminders
+│       ├── scheduled_task.py   # Tarefas agendadas: parsing, cron, execução com web search
+│       ├── scheduled_task_store.py  # CRUD Supabase para tabela scheduled_tasks
 │       ├── document.py         # Processamento de PDF/DOCX
 │       ├── transcribe.py       # Transcrição de áudio via Whisper API + ffmpeg
 │       ├── refine.py           # Refinamento de transcrições via GPT-4o-mini
@@ -202,6 +231,7 @@ whatsapp-agent/
 | Perfis de usuário | Supabase (PostgreSQL) |
 | Lembretes (agendamento) | APScheduler 4.x async + SQLAlchemy |
 | Lembretes (parsing de datas) | dateparser (pt-BR nativo) |
+| Tarefas agendadas (execução) | APScheduler CronTrigger + gpt-5.4 + web_search |
 | Análise de vídeos YouTube | Google Gemini 2.5 Flash |
 | Leitura de páginas web | Jina Reader (r.jina.ai) |
 | HTTP client | httpx (async) |
@@ -260,6 +290,24 @@ CREATE TABLE user_profiles (
 );
 
 ALTER TABLE user_profiles DISABLE ROW LEVEL SECURITY;
+
+-- Tabela de tarefas agendadas
+CREATE TABLE scheduled_tasks (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    phone            TEXT NOT NULL,
+    name             TEXT NOT NULL,
+    prompt           TEXT NOT NULL,
+    cron_expression  TEXT NOT NULL,
+    timezone         TEXT NOT NULL DEFAULT 'America/Sao_Paulo',
+    job_id           TEXT,
+    active           BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_scheduled_tasks_phone_active ON scheduled_tasks (phone, active);
+
+ALTER TABLE scheduled_tasks DISABLE ROW LEVEL SECURITY;
 ```
 
 ### 3. Variáveis de ambiente
@@ -361,6 +409,7 @@ No painel de developers.facebook.com:
 | OpenAI GPT-4o-mini (refinamento de transcrição) | ~$0.001/msg |
 | OpenAI gpt-image-1.5 (imagem) | ~$0.02-0.08/imagem |
 | OpenAI web_search (busca) | ~$0.001/chamada |
+| OpenAI gpt-5.4 (tarefa agendada com web search) | ~$0.01-0.02/execução |
 | Jina Reader (páginas web) | Gratuito |
 | Supabase | Gratuito (free tier) |
 | Railway | $0-25/mês (trial: $5 créditos grátis) |
@@ -376,4 +425,6 @@ No painel de developers.facebook.com:
 - **Números brasileiros:** A Meta normaliza números BR removendo um dígito 9. Configure `ALLOWED_NUMBERS` com o formato que a Meta envia.
 - **Timezone:** O servidor roda em UTC (Railway). Lembretes usam `USER_TIMEZONE` para calcular horários relativos corretamente.
 - **PgBouncer:** O Supabase usa PgBouncer em modo transaction, que não suporta prepared statements. O engine é criado com `statement_cache_size=0` para evitar `DuplicatePreparedStatementError` na inicialização do APScheduler.
+- **Tarefas agendadas vs. lembretes:** Lembretes enviam texto fixo na hora agendada. Tarefas agendadas executam um prompt completo com `gpt-5.4` + `web_search` a cada disparo, gerando conteúdo dinâmico. Ambos usam APScheduler com persistência no PostgreSQL.
+- **Restauração de jobs:** No startup do servidor, todos os jobs de tarefas agendadas são restaurados do banco para o scheduler. Isso garante que tarefas sobrevivam redeploys.
 - **Logs:** Se a pasta `logs/` existir na raiz do projeto, o app escreve em `logs/aisha.log` com rotação automática (5 MB × 3 arquivos). Caso contrário, só imprime no stdout.

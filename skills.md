@@ -251,7 +251,51 @@ Para cancelar: 'cancela o lembrete 1'
 
 ---
 
-## 9. Análise de Vídeos do YouTube
+## 9. Tarefas Agendadas (Scheduled Tasks)
+
+A Aisha executa tarefas recorrentes automaticamente: pesquisa na web, gera um relatório com IA e envia o resultado no WhatsApp. Diferente dos lembretes (que enviam um texto fixo), as tarefas agendadas **executam uma ação do agente** a cada disparo.
+
+### Criar uma tarefa agendada
+
+```
+"toda segunda me mande um relatório com as últimas notícias sobre o Irã"
+"todo dia às 7h me mande o resumo do mercado financeiro"
+"toda sexta às 18h pesquise as novidades de IA da semana e me mande um resumo"
+"diariamente às 8h me mande a previsão do tempo para Fortaleza"
+```
+
+**Resposta da Aisha:**
+```
+✅ Tarefa agendada criada!
+📌 Relatório Irã
+🕐 toda segunda-feira às 09:00
+📝 Pesquise as últimas notícias sobre o Irã da última semana...
+
+Cada vez que disparar, vou executar essa tarefa com busca na web e te enviar o resultado.
+```
+
+### Listar tarefas agendadas
+
+```
+"quais são minhas tarefas agendadas?"
+"lista minhas tarefas recorrentes"
+```
+
+### Cancelar uma tarefa agendada
+
+```
+"cancela a tarefa agendada 1"
+"remove a tarefa recorrente do relatório"
+```
+
+**Observações:**
+- Cada execução usa busca na web para informações atualizadas
+- O modelo GPT-5.4 gera o relatório — mesma qualidade de uma conversa complexa
+- Tarefas sobrevivem reinicializações do servidor (persistidas no banco)
+
+---
+
+## 10. Análise de Vídeos do YouTube
 
 A Aisha analisa qualquer vídeo público do YouTube usando o Gemini 2.5 Flash. Basta enviar o link.
 
@@ -290,7 +334,7 @@ Aisha: [análise completa do vídeo]
 
 ---
 
-## 10. Leitura de Páginas Web
+## 11. Leitura de Páginas Web
 
 A Aisha lê qualquer URL pública e processa o conteúdo conforme sua instrução. Basta enviar o link.
 
@@ -330,7 +374,7 @@ Aisha: [resumo da notícia]
 
 ---
 
-## 11. Personalização e Perfil
+## 12. Personalização e Perfil
 
 A Aisha aprende sobre você e se adapta. Você pode definir um contexto pessoal, mudar o idioma da conversa, e consultar o que ela sabe sobre você.
 
@@ -369,7 +413,7 @@ A Aisha lista: contexto pessoal salvo, idioma preferido, lembretes ativos e esta
 
 ---
 
-## 12. Roteamento Automático de Modelo
+## 13. Roteamento Automático de Modelo
 
 A Aisha escolhe automaticamente o melhor modelo para cada mensagem — você não precisa fazer nada:
 
@@ -382,6 +426,8 @@ A Aisha escolhe automaticamente o melhor modelo para cada mensagem — você nã
 | Transcrição de áudio | `whisper-1` |
 | Refinamento de transcrição | `gpt-4o-mini` |
 | Extração de intenção de lembrete | `gpt-4.1-mini` |
+| Extração de intenção de tarefa agendada | `gpt-4o-mini` |
+| Execução de tarefa agendada (com web search) | `gpt-5.4` |
 | Resumo de documentos PDF/DOCX | `gpt-4.1` |
 | Análise de vídeo YouTube | `gemini-2.5-flash` |
 | Leitura de páginas web | Jina Reader + `gpt-4.1` |

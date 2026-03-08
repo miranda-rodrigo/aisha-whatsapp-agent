@@ -264,8 +264,11 @@ async def _chat_self(
 
     extra_user_data = ""
     if action.action == "list_profile" and phone:
+        from aisha.skills.scheduled_task_store import get_tasks
+
         fresh_profile = await get_profile(phone)
         reminders = await get_reminders(phone)
+        scheduled_tasks = await get_tasks(phone)
 
         parts = ["DADOS DO USUÁRIO PARA LISTAR:\n"]
         ctx = fresh_profile.get("personal_context", "") if fresh_profile else ""
@@ -286,6 +289,12 @@ async def _chat_self(
             parts.append(f"Lembretes ativos ({len(reminders)}):\n" + "\n".join(reminder_lines))
         else:
             parts.append("Lembretes ativos: nenhum")
+
+        if scheduled_tasks:
+            task_lines = [f"  - {t['name']} (cron: {t['cron_expression']})" for t in scheduled_tasks]
+            parts.append(f"Tarefas agendadas ({len(scheduled_tasks)}):\n" + "\n".join(task_lines))
+        else:
+            parts.append("Tarefas agendadas: nenhuma")
 
         extra_user_data = "\n".join(parts)
 

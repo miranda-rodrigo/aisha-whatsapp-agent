@@ -1,6 +1,9 @@
+import json
 import logging
 import logging.handlers
 import re
+import time
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -23,6 +26,7 @@ from aisha.skills.document import extract_text_async, is_supported_document, MAX
 from aisha.skills.image_state import clear_pending_image, get_pending_image, store_pending_image
 from aisha.skills.refine import refine_transcription
 from aisha.skills.reminder import handle_reminder, is_reminder_intent
+from aisha.skills.scheduled_task import handle_scheduled_task, is_scheduled_task_intent, restore_scheduled_jobs
 from aisha.session import delete_session, get_response_id, upsert_session
 from aisha.skills.transcribe import transcribe_audio_bytes
 from aisha.user_profile import increment_stat
@@ -64,8 +68,26 @@ log = logging.getLogger(__name__)
 
 http_client: httpx.AsyncClient
 scheduler: AsyncScheduler
-processed_messages: set[str] = set()
-MAX_PROCESSED_CACHE = 1000
+
+# --- Deduplication with TTL (Layer 5) ---
+_processed_messages: OrderedDict[str, float] = OrderedDict()
+_DEDUP_TTL_SECONDS = 300
+
+def _is_duplicate(msg_id: str) -> bool:
+    now = time.time()
+    while _processed_messages:
+        oldest_id, oldest_time = next(iter(_processed_messages.items()))
+        if now - oldest_time > _DEDUP_TTL_SECONDS:
+            _processed_messages.pop(oldest_id)
+        else:
+            break
+    if msg_id in _processed_messages:
+        return True
+    _processed_messages[msg_id] = now
+    return False
+
+# --- Temporal echo detection (Layer 4) ---
+_last_reply_time: dict[str, float] = {}
 
 _project_ref = SUPABASE_URL.replace("https://", "").split(".")[0]
 _DB_URL = (
@@ -93,6 +115,8 @@ async def lifespan(app: FastAPI):
         scheduler = sched
         await sched.start_in_background()
         log.info("APScheduler started")
+        restored = await restore_scheduled_jobs(sched)
+        log.info(f"Restored {restored} scheduled task(s)")
         log.info("WhatsApp agent started")
         yield
 
@@ -133,17 +157,46 @@ async def receive_webhook(request: Request):
     except (KeyError, IndexError):
         return {"status": "no message"}
 
+    # Layer 3: log suspicious webhooks missing contacts
+    contacts = value.get("contacts")
+    if not contacts:
+        log.warning(
+            f"Webhook without contacts field — possible phantom: "
+            f"{json.dumps(body, ensure_ascii=False)[:500]}"
+        )
+
+    # Layer 1: ignore echoed messages from the bot's own number
+    metadata = value.get("metadata", {})
+    bot_phone = metadata.get("display_phone_number", "").replace("+", "")
+    sender = message.get("from", "")
+    if sender and bot_phone and sender == bot_phone:
+        log.info(f"Ignoring own message echo from bot number {sender}")
+        return {"status": "own message"}
+
     msg_id = message.get("id", "")
-    if msg_id in processed_messages:
+    if _is_duplicate(msg_id):
         log.info(f"Duplicate message {msg_id}, skipping")
         return {"status": "duplicate"}
-    processed_messages.add(msg_id)
-    if len(processed_messages) > MAX_PROCESSED_CACHE:
-        processed_messages.clear()
 
-    sender = message.get("from", "")
     msg_type = message.get("type", "")
-    log.info(f"Message from {sender}, type={msg_type}, id={msg_id}")
+
+    # Layer 2: log message text content for diagnostics
+    text_preview = ""
+    if msg_type == "text":
+        text_preview = message.get("text", {}).get("body", "")
+    log.info(
+        f"Message from {sender}, type={msg_type}, id={msg_id}, "
+        f"text={text_preview[:100]!r}"
+    )
+
+    # Layer 4: warn if message arrives very soon after bot replied
+    last_reply = _last_reply_time.get(sender, 0)
+    gap = time.time() - last_reply
+    if last_reply and gap < 5.0:
+        log.warning(
+            f"Message from {sender} arrived {gap:.1f}s after bot reply "
+            f"— possible echo: {text_preview[:80]!r}"
+        )
 
     if sender not in ALLOWED_NUMBERS:
         log.info(f"Ignored: {sender} not in allowed list")
@@ -277,7 +330,16 @@ async def handle_chat(sender: str, text: str):
         log.info(f"Classified as {complexity}: {text[:80]}")
 
         if complexity != "SELF":
-            # 8. Reminder intent (only when not a capability/self question)
+            # 8a. Scheduled task intent
+            if is_scheduled_task_intent(text):
+                log.info(f"Scheduled task intent detected for {sender}")
+                reply = await handle_scheduled_task(sender, text, scheduler)
+                if "✅ Tarefa agendada criada" in reply:
+                    await increment_stat(sender, "scheduled_tasks_created")
+                await send_message(sender, reply)
+                return
+
+            # 8b. Reminder intent (only when not a capability/self question)
             if is_reminder_intent(text):
                 log.info(f"Reminder intent detected for {sender}")
                 reply = await handle_reminder(sender, text, scheduler)
@@ -497,6 +559,7 @@ async def send_message(to: str, text: str):
             "text": {"body": text},
         },
     )
+    _last_reply_time[to] = time.time()
     log.info(f"Message sent to {to}: status={resp.status_code}")
     if resp.status_code != 200:
         log.error(f"Send failed: {resp.text}")
@@ -523,6 +586,7 @@ async def send_image(to: str, image_bytes: bytes, caption: str = ""):
         payload["image"]["caption"] = caption
 
     resp = await http_client.post(f"{GRAPH_API_URL}/messages", json=payload)
+    _last_reply_time[to] = time.time()
     log.info(f"Image sent to {to}: status={resp.status_code}")
     if resp.status_code != 200:
         log.error(f"Image send failed: {resp.text}")
