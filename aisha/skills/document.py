@@ -8,7 +8,7 @@ from pathlib import Path
 
 from openai import AsyncOpenAI
 
-from config import OPENAI_API_KEY
+from aisha.config import OPENAI_API_KEY
 
 log = logging.getLogger(__name__)
 

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from openai import OpenAI
 
-from config import OPENAI_API_KEY
+from aisha.config import OPENAI_API_KEY
 
 MAX_FILE_SIZE = 24 * 1024 * 1024  # 24 MB safety margin for Whisper's 25 MB limit
 CHUNK_DURATION_SECONDS = 600  # 10 minutes per chunk

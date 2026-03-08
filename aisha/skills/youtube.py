@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from google import genai
 from google.genai import types
 
-from config import GEMINI_API_KEY
+from aisha.config import GEMINI_API_KEY
 
 log = logging.getLogger(__name__)
 

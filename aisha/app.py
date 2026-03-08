@@ -8,8 +8,8 @@ from apscheduler.datastores.sqlalchemy import SQLAlchemyDataStore
 from fastapi import FastAPI, Query, Request
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from chat import chat, chat_with_document, chat_with_image, wants_new_session
-from config import (
+from aisha.skills.chat import chat, chat_with_document, chat_with_image, wants_new_session
+from aisha.config import (
     ALLOWED_NUMBERS,
     DATABASE_PASSWORD,
     GRAPH_API_URL,
@@ -17,14 +17,14 @@ from config import (
     WEBHOOK_VERIFY_TOKEN,
     WHATSAPP_TOKEN,
 )
-from document import extract_text_async, is_supported_document, MAX_DOCUMENT_SIZE
-from image_state import clear_pending_image, get_pending_image, store_pending_image
-from refine import refine_transcription
-from reminder import handle_reminder, is_reminder_intent
-from session import delete_session, get_response_id, upsert_session
-from transcribe import transcribe_audio_bytes
-from user_profile import increment_stat
-from youtube import (
+from aisha.skills.document import extract_text_async, is_supported_document, MAX_DOCUMENT_SIZE
+from aisha.skills.image_state import clear_pending_image, get_pending_image, store_pending_image
+from aisha.skills.refine import refine_transcription
+from aisha.skills.reminder import handle_reminder, is_reminder_intent
+from aisha.session import delete_session, get_response_id, upsert_session
+from aisha.skills.transcribe import transcribe_audio_bytes
+from aisha.user_profile import increment_stat
+from aisha.skills.youtube import (
     analyze_video,
     clear_pending_video,
     extract_youtube_url,

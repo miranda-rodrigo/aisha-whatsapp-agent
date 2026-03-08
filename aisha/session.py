@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from config import SESSION_TIMEOUT_MINUTES, SUPABASE_KEY, SUPABASE_URL
+from aisha.config import SESSION_TIMEOUT_MINUTES, SUPABASE_KEY, SUPABASE_URL
 
 log = logging.getLogger(__name__)
 

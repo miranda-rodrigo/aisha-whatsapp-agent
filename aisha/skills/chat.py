@@ -19,7 +19,7 @@ from typing import Literal
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
-from config import OPENAI_API_KEY
+from aisha.config import OPENAI_API_KEY
 
 log = logging.getLogger(__name__)
 
@@ -62,7 +62,7 @@ Execute a instrução do usuário sobre a imagem. Isso pode incluir: melhorar a 
 editar elementos, mudar estilo, gerar uma nova imagem baseada nesta, descrever a imagem, \
 extrair texto, remover fundo, etc. Use a ferramenta de geração de imagem quando apropriado."""
 
-_skills_path = Path(__file__).parent / "aisha_skills.md"
+_skills_path = Path(__file__).parents[2] / "docs" / "skills.md"
 _SKILLS_CONTENT: str = _skills_path.read_text(encoding="utf-8") if _skills_path.exists() else ""
 
 _SELF_INSTRUCTIONS = f"""\
@@ -156,7 +156,7 @@ async def chat(
     phone: str | None = None,
 ) -> ChatResult:
     """Route to gpt-4.1, gpt-5.4, or self-awareness handler based on message classification."""
-    from user_profile import get_profile
+    from aisha.user_profile import get_profile
 
     profile = await get_profile(phone) if phone else None
     complexity = await _classify(user_input)
@@ -223,8 +223,8 @@ async def _chat_self(
     profile: dict | None = None,
 ) -> ChatResult:
     """Handle self-awareness questions, profile customization, and user data queries."""
-    from reminder_store import get_reminders
-    from user_profile import get_profile, upsert_context, upsert_language
+    from aisha.skills.reminder_store import get_reminders
+    from aisha.user_profile import get_profile, upsert_context, upsert_language
 
     action = await _detect_self_action(user_input)
     log.info(f"Self action: {action.action} for {phone}")

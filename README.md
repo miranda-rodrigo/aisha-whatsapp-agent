@@ -1,6 +1,6 @@
 # Aisha — Assistente Pessoal via WhatsApp
 
-Aisha é uma assistente pessoal inteligente que roda no WhatsApp Business API. Ela conversa, transcreve áudios, pesquisa na web, gera imagens, cria lembretes e mantém contexto de conversa — tudo pelo WhatsApp.
+Aisha é uma assistente pessoal inteligente que roda no WhatsApp Business API. Ela conversa, transcreve áudios, pesquisa na web, gera imagens, cria lembretes, analisa documentos, entende vídeos do YouTube e mantém contexto de conversa — tudo pelo WhatsApp.
 
 ## Funcionalidades
 
@@ -9,9 +9,21 @@ Aisha é uma assistente pessoal inteligente que roda no WhatsApp Business API. E
 - Um classificador leve (gpt-4.1-mini) decide qual modelo usar:
   - **Simples** (saudações, perguntas diretas, bate-papo casual) → `gpt-4.1` — rápido e barato
   - **Complexo** (raciocínio, pesquisa, geração de imagem, tarefas técnicas) → `gpt-5.4` — mais capaz
+  - **Self** (perguntas sobre a própria Aisha, skills, como usar) → `gpt-4.1` com contexto de skills
 - A Aisha responde de forma natural no idioma do usuário
 - Mantém contexto da conversa por até 10 minutos de inatividade
 - Para iniciar um novo assunto, diga: "nova conversa", "novo assunto", "mudar de assunto" ou "reset"
+
+### Auto-Consciência
+- A Aisha sabe responder sobre suas próprias capacidades
+- Exemplos: "o que você faz?", "você pode criar lembretes?", "como funciona a transcrição?"
+- O conteúdo das skills é carregado de `docs/skills.md` e injetado no prompt quando necessário
+
+### Personalização e Perfil
+- **Contexto pessoal:** envie informações sobre você e a Aisha lembra para sempre
+- **Idioma:** peça para mudar o idioma da conversa ("vamos falar em inglês")
+- **O que você sabe de mim?** A Aisha lista: contexto pessoal, lembretes ativos, preferências e estatísticas de uso
+- Estatísticas rastreadas: áudios, imagens, documentos, vídeos YouTube, lembretes criados
 
 ### Transcrição de Áudio
 - Áudios enviados **sem** mencionar "Aisha" são transcritos com Whisper e refinados com GPT-4o-mini
@@ -42,6 +54,12 @@ Aisha é uma assistente pessoal inteligente que roda no WhatsApp Business API. E
 - Após receber o resultado, você pode pedir mais modificações na mesma conversa (edição iterativa via `previous_response_id`)
 - Imagem pendente expira após 5 minutos sem instrução
 
+### Documentos (PDF e Word)
+- Envie um PDF ou DOCX e a Aisha resume automaticamente
+- Para instruções específicas, envie o documento com legenda (ex: "extraia os valores")
+- O contexto do documento é persistido na sessão — perguntas de follow-up funcionam
+- Suporta documentos de até 20 MB
+
 ### Análise de Vídeos do YouTube (Gemini 2.5 Flash)
 - Envie qualquer link do YouTube e a Aisha analisa o vídeo diretamente
 - Pode enviar o link com instrução na mesma mensagem, ou só o link e a Aisha pergunta o que fazer
@@ -54,6 +72,7 @@ Aisha é uma assistente pessoal inteligente que roda no WhatsApp Business API. E
 - Link gerado automaticamente para adicionar ao Google Calendar
 - Suporte a lembretes recorrentes ("todo dia às 9h", "toda segunda às 7h")
 - Gerenciamento completo: listar, cancelar e editar lembretes
+- QA inteligente: se o horário já passou, sugere amanhã; se está muito próximo, pede confirmação
 
 **Exemplos:**
 ```
@@ -85,33 +104,30 @@ Mensagem WhatsApp
         │                     └── sem "Aisha" ──────► Refinamento (GPT-4o-mini)
         │                                              └── devolve transcrição
         │
-        └── Imagem ──┬── com legenda ──► Processa imagem com legenda como instrução
-                     └── sem legenda ──► Armazena imagem + pergunta o que fazer
-
-Processa imagem
-        └── gpt-5.4 + image_generation (input multimodal: imagem + texto)
-                └── envia resultado no WhatsApp
-                      └── follow-ups via previous_response_id (edição iterativa)
+        ├── Imagem ──┬── com legenda ──► Processa imagem com legenda como instrução
+        │            └── sem legenda ──► Armazena imagem + pergunta o que fazer
+        │
+        └── Documento ──► Extrai texto + resume / responde instrução
+                              └── contexto persistido para follow-ups
 
 Chat
         │
-        ├── link YouTube ──► youtube.py ──► Gemini 2.5 Flash ──► análise
+        ├── SELF (perguntas sobre Aisha) ──► gpt-4.1 + skills.md
+        │       ├── set_context ──► salva contexto pessoal
+        │       ├── set_language ──► muda idioma
+        │       └── list_profile ──► lista tudo sobre o usuário
         │
-        ├── menciona lembrete ──► reminder.py
-        │                              ├── criar ──► Supabase + APScheduler + link GCal
-        │                              ├── listar ──► lista do Supabase
-        │                              ├── cancelar ──► remove do Supabase + APScheduler
-        │                              └── editar ──► atualiza Supabase + APScheduler
+        ├── link YouTube ──► Gemini 2.5 Flash ──► análise
         │
-        └── conversa normal ──► gpt-4.1-mini (classifica complexidade)
-                    │
+        ├── menciona lembrete ──► reminder
+        │       ├── criar ──► Supabase + APScheduler + link GCal
+        │       ├── listar ──► lista do Supabase
+        │       ├── cancelar ──► remove do Supabase + APScheduler
+        │       └── editar ──► atualiza Supabase + APScheduler
+        │
+        └── conversa normal ──► classifica complexidade
                     ├── SIMPLE ──► gpt-4.1
-                    │               └── resposta direta
-                    │
-                    └── COMPLEX ──► gpt-5.4
-                                    ├── usa web_search ──► resposta com info atualizada
-                                    ├── usa image_generation ──► envia imagem no WhatsApp
-                                    └── resposta direta
+                    └── COMPLEX ──► gpt-5.4 (web search, image gen)
 ```
 
 ## Memória de Sessão
@@ -128,19 +144,31 @@ A Aisha mantém contexto de conversa usando a Responses API da OpenAI com `previ
 
 ```
 whatsapp-agent/
-├── app.py              # FastAPI: webhook, roteamento, APScheduler lifespan
-├── chat.py             # Skill de conversa: classificador + gpt-4.1 + gpt-5.4 + edição de imagem
-├── image_state.py      # Estado em memória para imagens pendentes de instrução (TTL 5min)
-├── reminder.py         # Skill de lembretes: parsing LLM, agendamento, Google Calendar
-├── reminder_store.py   # CRUD Supabase para tabela reminders
-├── youtube.py          # Skill de vídeos YouTube via Gemini 2.5 Flash
-├── session.py          # Gerenciamento de sessões no Supabase (TTL 10min)
-├── transcribe.py       # Transcrição de áudio via Whisper API + ffmpeg
-├── refine.py           # Refinamento de transcrições via GPT-4o-mini
-├── config.py           # Variáveis de ambiente
-├── Dockerfile          # Python 3.12 + ffmpeg
+├── aisha/                      # Pacote principal
+│   ├── __init__.py
+│   ├── app.py                  # FastAPI: webhook, roteamento, APScheduler lifespan
+│   ├── config.py               # Variáveis de ambiente
+│   ├── session.py              # Gerenciamento de sessões no Supabase (TTL 10min)
+│   ├── user_profile.py         # CRUD de perfis de usuário (contexto, idioma, stats)
+│   └── skills/                 # Habilidades da Aisha
+│       ├── __init__.py
+│       ├── chat.py             # Chat: classificador + gpt-4.1 + gpt-5.4 + auto-consciência
+│       ├── reminder.py         # Lembretes: parsing LLM, agendamento, Google Calendar
+│       ├── reminder_store.py   # CRUD Supabase para tabela reminders
+│       ├── document.py         # Processamento de PDF/DOCX
+│       ├── transcribe.py       # Transcrição de áudio via Whisper API + ffmpeg
+│       ├── refine.py           # Refinamento de transcrições via GPT-4o-mini
+│       ├── youtube.py          # Análise de vídeos YouTube via Gemini 2.5 Flash
+│       └── image_state.py      # Estado em memória para imagens pendentes (TTL 5min)
+├── docs/
+│   └── skills.md               # Documentação das habilidades da Aisha
+├── Dockerfile                  # Python 3.12 + ffmpeg
+├── .dockerignore
+├── .gitignore
+├── .env                        # Variáveis locais (não vai pro deploy)
 ├── requirements.txt
-└── .env                # Variáveis locais (não vai pro deploy)
+├── README.md
+└── logo.png
 ```
 
 ## Stack
@@ -150,15 +178,18 @@ whatsapp-agent/
 | Linguagem | Python 3.12 |
 | Framework | FastAPI + uvicorn |
 | WhatsApp | Meta Cloud API (WhatsApp Business) |
-| LLM classificador | OpenAI gpt-4.1-mini (detecta complexidade) |
+| LLM classificador | OpenAI gpt-4.1-mini (detecta complexidade + self) |
 | LLM chat simples | OpenAI gpt-4.1 via Responses API |
 | LLM chat complexo | OpenAI gpt-5.4 via Responses API |
+| LLM auto-consciência | OpenAI gpt-4.1 via Responses API + skills.md |
+| LLM documentos | OpenAI gpt-4.1 via Responses API |
 | LLM refinamento | OpenAI gpt-4o-mini |
 | Transcrição | OpenAI Whisper (whisper-1) |
 | Geração/edição de imagem | gpt-image-1.5 (via Responses API image_generation) |
 | Busca na web | Ferramenta nativa da Responses API |
 | Conversão de áudio | ffmpeg |
 | Sessões | Supabase (PostgreSQL) |
+| Perfis de usuário | Supabase (PostgreSQL) |
 | Lembretes (agendamento) | APScheduler 4.x async + SQLAlchemy |
 | Lembretes (parsing de datas) | dateparser (pt-BR nativo) |
 | Análise de vídeos YouTube | Google Gemini 2.5 Flash |
@@ -207,6 +238,17 @@ CREATE INDEX idx_reminders_phone_status ON reminders (phone, status);
 CREATE INDEX idx_reminders_scheduled    ON reminders (scheduled_at) WHERE status = 'pending';
 
 ALTER TABLE reminders DISABLE ROW LEVEL SECURITY;
+
+-- Tabela de perfis de usuário
+CREATE TABLE user_profiles (
+    phone            TEXT PRIMARY KEY,
+    personal_context TEXT,
+    language         TEXT DEFAULT 'pt-BR',
+    stats            JSONB DEFAULT '{}'::jsonb,
+    updated_at       TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE user_profiles DISABLE ROW LEVEL SECURITY;
 ```
 
 ### 3. Variáveis de ambiente
@@ -221,6 +263,7 @@ OPENAI_API_KEY=sk-...
 ALLOWED_NUMBERS=5511999999999,5585999999999
 SUPABASE_URL=https://xxxxx.supabase.co
 SUPABASE_KEY=sb_publishable_... ou sb_secret_...
+DATABASE_PASSWORD=sua_senha_do_banco
 USER_TIMEZONE=America/Sao_Paulo
 REMINDER_LEAD_MINUTES=15
 GEMINI_API_KEY=AIzaSy...
@@ -235,6 +278,7 @@ GEMINI_API_KEY=AIzaSy...
 | `ALLOWED_NUMBERS` | Números autorizados separados por vírgula (formato sem + e sem espaços) |
 | `SUPABASE_URL` | URL do projeto Supabase (ex: `https://xxxxx.supabase.co`) |
 | `SUPABASE_KEY` | Publishable ou Secret key do Supabase |
+| `DATABASE_PASSWORD` | Senha do PostgreSQL (usada para conexão do APScheduler) |
 | `USER_TIMEZONE` | Timezone do usuário para lembretes (padrão: `America/Sao_Paulo`) |
 | `REMINDER_LEAD_MINUTES` | Minutos de antecedência para o aviso do lembrete (padrão: `15`) |
 | `GEMINI_API_KEY` | API key do Google AI Studio para análise de vídeos YouTube (opcional) |
@@ -243,18 +287,16 @@ GEMINI_API_KEY=AIzaSy...
 ### 4. Rodar localmente
 
 ```bash
-# Criar e ativar ambiente virtual
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
-# Instalar dependências
 pip install -r requirements.txt
 
 # Instalar ffmpeg (macOS)
 brew install ffmpeg
 
 # Rodar o servidor
-uvicorn app:app --reload --port 8000
+uvicorn aisha.app:app --reload --port 8000
 ```
 
 Para expor o servidor local ao webhook da Meta, use [ngrok](https://ngrok.com):
@@ -303,7 +345,7 @@ No painel de developers.facebook.com:
 | WhatsApp Cloud API (service messages) | Gratuito |
 | OpenAI Whisper (transcrição de áudio) | ~$0.006/min |
 | OpenAI gpt-4.1-mini (classificador de complexidade) | ~$0.00001/msg |
-| OpenAI gpt-4.1 (chat simples) | ~$0.001/msg |
+| OpenAI gpt-4.1 (chat simples + self + docs) | ~$0.001/msg |
 | OpenAI gpt-5.4 (chat complexo) | ~$0.005-0.015/msg |
 | OpenAI GPT-4o-mini (refinamento de transcrição) | ~$0.001/msg |
 | OpenAI gpt-image-1.5 (imagem) | ~$0.02-0.08/imagem |
@@ -320,3 +362,4 @@ No painel de developers.facebook.com:
 - **`.dockerignore`:** Impede que o `.env` local (com placeholders) sobreescreva as variáveis de produção dentro do container.
 - **Porta dinâmica:** O Dockerfile usa `${PORT:-8000}` para compatibilidade com Railway, que injeta a porta via variável de ambiente.
 - **Números brasileiros:** A Meta normaliza números BR removendo um dígito 9. Configure `ALLOWED_NUMBERS` com o formato que a Meta envia.
+- **Timezone:** O servidor roda em UTC (Railway). Lembretes usam `USER_TIMEZONE` para calcular horários relativos corretamente.

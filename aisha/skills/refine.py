@@ -2,7 +2,7 @@
 
 from openai import AsyncOpenAI
 
-from config import OPENAI_API_KEY
+from aisha.config import OPENAI_API_KEY
 
 SYSTEM_PROMPT = """\
 Atue como um editor de textos especializado em transcrições. \

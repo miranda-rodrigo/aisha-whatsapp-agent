@@ -14,14 +14,14 @@ from apscheduler.triggers.date import DateTrigger
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
-from config import (
+from aisha.config import (
     GRAPH_API_URL,
     OPENAI_API_KEY,
     REMINDER_LEAD_MINUTES,
     USER_TIMEZONE,
     WHATSAPP_TOKEN,
 )
-from reminder_store import (
+from aisha.skills.reminder_store import (
     Reminder,
     cancel_reminder,
     get_reminders,
