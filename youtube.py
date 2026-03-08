@@ -12,8 +12,19 @@ from config import GEMINI_API_KEY
 
 log = logging.getLogger(__name__)
 
-_client = genai.Client(api_key=GEMINI_API_KEY)
 _MODEL = "gemini-2.5-flash"
+_client: genai.Client | None = None
+
+
+def _get_client() -> genai.Client:
+    global _client
+    if _client is None:
+        if not GEMINI_API_KEY:
+            raise ValueError(
+                "GEMINI_API_KEY não configurada. Adicione a variável de ambiente no Railway."
+            )
+        _client = genai.Client(api_key=GEMINI_API_KEY)
+    return _client
 
 _YT_PATTERN = re.compile(
     r"https?://(?:www\.)?(?:youtube\.com/watch\?(?:[^&\s]*&)*v=|youtu\.be/)([\w-]{11})[^\s]*",
@@ -72,7 +83,7 @@ async def analyze_video(url: str, instruction: str) -> str:
 
     log.info(f"Analyzing YouTube video: {url} | prompt: {prompt[:80]}")
 
-    response = await _client.aio.models.generate_content(
+    response = await _get_client().aio.models.generate_content(
         model=_MODEL,
         contents=[
             types.Part.from_uri(file_uri=url, mime_type="video/mp4"),
