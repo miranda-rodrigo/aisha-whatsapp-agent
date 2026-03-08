@@ -10,7 +10,7 @@ from apscheduler.datastores.sqlalchemy import SQLAlchemyDataStore
 from fastapi import FastAPI, Query, Request
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from aisha.skills.chat import chat, chat_with_document, chat_with_image, classify, wants_new_session
+from aisha.skills.chat import chat, chat_with_document, chat_with_image, chat_with_webpage, classify, wants_new_session
 from aisha.config import (
     ALLOWED_NUMBERS,
     DATABASE_PASSWORD,
@@ -33,6 +33,14 @@ from aisha.skills.youtube import (
     get_pending_video,
     store_pending_video,
     strip_youtube_url,
+)
+from aisha.skills.webpage import (
+    clear_pending_page,
+    extract_web_url,
+    fetch_page,
+    get_pending_page,
+    store_pending_page,
+    strip_web_url,
 )
 
 _log_handlers: list[logging.Handler] = [logging.StreamHandler()]
@@ -185,7 +193,27 @@ async def handle_chat(sender: str, text: str):
             await send_message(sender, reply)
             return
 
-        # 3. YouTube URL in current message
+        # 3. Pending webpage — user is now sending the instruction
+        pending_page = get_pending_page(sender)
+        if pending_page:
+            log.info(f"Pending webpage for {sender} — processing with instruction: {text[:60]}")
+            clear_pending_page(sender)
+            await send_message(sender, "⏳ Lendo página...")
+            await increment_stat(sender, "webpages")
+            try:
+                content = await fetch_page(pending_page.url)
+                prev_id = await get_response_id(sender)
+                result = await chat_with_webpage(content, pending_page.url, text, prev_id)
+                if result.response_id:
+                    await upsert_session(sender, result.response_id)
+                if result.text:
+                    await send_message(sender, result.text)
+            except Exception as e:
+                log.exception("Webpage processing failed")
+                await send_message(sender, f"Não consegui acessar a página: {e}")
+            return
+
+        # 4. YouTube URL in current message
         yt_url = extract_youtube_url(text)
         if yt_url:
             instruction = strip_youtube_url(text)
@@ -210,12 +238,46 @@ async def handle_chat(sender: str, text: str):
                 )
             return
 
-        # 4. Classify intent (LLM) — SELF goes straight to chat, skipping skill routers
+        # 5. Web URL in current message
+        web_url = extract_web_url(text)
+        if web_url:
+            instruction = strip_web_url(text)
+            if instruction:
+                log.info(f"Web URL + instruction for {sender}: {web_url}")
+                await send_message(sender, "⏳ Lendo página...")
+                await increment_stat(sender, "webpages")
+                try:
+                    content = await fetch_page(web_url)
+                    prev_id = await get_response_id(sender)
+                    result = await chat_with_webpage(content, web_url, instruction, prev_id)
+                    if result.response_id:
+                        await upsert_session(sender, result.response_id)
+                    if result.text:
+                        await send_message(sender, result.text)
+                except Exception as e:
+                    log.exception("Webpage processing failed")
+                    await send_message(sender, f"Não consegui acessar a página: {e}")
+            else:
+                # No instruction — store and ask what to do
+                store_pending_page(sender, web_url)
+                log.info(f"Web URL stored for {sender}: {web_url}")
+                await send_message(
+                    sender,
+                    "🔗 Link detectado! O que você quer que eu faça com essa página?\n\n"
+                    "Exemplos:\n"
+                    "• _Resume essa notícia_\n"
+                    "• _Traduz para inglês_\n"
+                    "• _Quais são os pontos principais?_\n"
+                    "• _Explica de forma simples_",
+                )
+            return
+
+        # 7. Classify intent (LLM) — SELF goes straight to chat, skipping skill routers
         complexity = await classify(text)
         log.info(f"Classified as {complexity}: {text[:80]}")
 
         if complexity != "SELF":
-            # 5. Reminder intent (only when not a capability/self question)
+            # 8. Reminder intent (only when not a capability/self question)
             if is_reminder_intent(text):
                 log.info(f"Reminder intent detected for {sender}")
                 reply = await handle_reminder(sender, text, scheduler)
@@ -224,7 +286,7 @@ async def handle_chat(sender: str, text: str):
                 await send_message(sender, reply)
                 return
 
-        # 6. Chat (SELF / SIMPLE / COMPLEX)
+        # 9. Chat (SELF / SIMPLE / COMPLEX)
         if wants_new_session(text):
             await delete_session(sender)
             log.info(f"Session reset requested by {sender}")

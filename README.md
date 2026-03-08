@@ -17,7 +17,7 @@ Aisha é uma assistente pessoal inteligente que roda no WhatsApp Business API. E
 ### Auto-Consciência
 - A Aisha sabe responder sobre suas próprias capacidades
 - Exemplos: "o que você faz?", "você pode criar lembretes?", "como funciona a transcrição?"
-- O conteúdo das skills é carregado de `docs/skills.md` e injetado no prompt quando necessário
+- O conteúdo das skills é carregado de `skills.md` (raiz do projeto) e injetado no prompt quando necessário
 
 ### Personalização e Perfil
 - **Contexto pessoal:** envie informações sobre você e a Aisha lembra para sempre
@@ -66,6 +66,12 @@ Aisha é uma assistente pessoal inteligente que roda no WhatsApp Business API. E
 - Funciona com vídeos públicos de qualquer duração
 - Exemplos de uso: resumo, transcrição, pontos principais, post para LinkedIn, perguntas sobre o conteúdo
 
+### Leitura de Páginas Web (Jina Reader)
+- Envie qualquer URL pública e a Aisha lê e processa o conteúdo
+- Pode enviar o link com instrução na mesma mensagem, ou só o link e a Aisha pergunta o que fazer
+- Funciona com artigos, notícias, blogs e documentações
+- Exemplos de uso: resumo, tradução, extração de dados, explicação simplificada, post para LinkedIn
+
 ### Lembretes
 - Criação via linguagem natural em português
 - Aviso enviado por WhatsApp X minutos antes do evento (padrão: 15 min)
@@ -94,15 +100,14 @@ Aisha é uma assistente pessoal inteligente que roda no WhatsApp Business API. E
 ```
 Mensagem WhatsApp
         │
-        ├── Texto ──┬── imagem pendente? ──► Processa imagem com instrução
-        │           └── sem imagem ────────► Chat
+        ├── Texto ──► handle_chat (ver abaixo)
         │
         ├── Áudio ──► Whisper (transcrição)
         │                     │
         │                     ├── imagem pendente? ──► Processa imagem com instrução
         │                     ├── contém "Aisha" ───► Chat
         │                     └── sem "Aisha" ──────► Refinamento (GPT-4o-mini)
-        │                                              └── devolve transcrição
+        │                                              └── devolve transcrição limpa
         │
         ├── Imagem ──┬── com legenda ──► Processa imagem com legenda como instrução
         │            └── sem legenda ──► Armazena imagem + pergunta o que fazer
@@ -110,22 +115,27 @@ Mensagem WhatsApp
         └── Documento ──► Extrai texto + resume / responde instrução
                               └── contexto persistido para follow-ups
 
-Chat
+handle_chat (texto)
         │
-        ├── SELF (perguntas sobre Aisha) ──► gpt-4.1 + skills.md
-        │       ├── set_context ──► salva contexto pessoal
-        │       ├── set_language ──► muda idioma
-        │       └── list_profile ──► lista tudo sobre o usuário
-        │
-        ├── link YouTube ──► Gemini 2.5 Flash ──► análise
-        │
-        ├── menciona lembrete ──► reminder
+        ├── 1. imagem pendente? ──► Processa imagem com instrução
+        ├── 2. YouTube pendente? ──► Gemini 2.5 Flash ──► análise
+        ├── 3. webpage pendente? ──► Jina Reader + gpt-4.1 ──► processa
+        ├── 4. link YouTube? ──────► Gemini 2.5 Flash (ou armazena + pergunta)
+        ├── 5. link web? ──────────► Jina Reader + gpt-4.1 (ou armazena + pergunta)
+        ├── 6. classify (gpt-4.1-mini) ──► SELF? ──► gpt-4.1 + skills.md
+        │                                   │        ├── set_context ──► salva contexto
+        │                                   │        ├── set_language ──► muda idioma
+        │                                   │        └── list_profile ──► lista perfil
+        │                                   │
+        │                                   └── SIMPLE/COMPLEX
+        │                                         │
+        ├── 7. menciona lembrete? ────────────────┤──► reminder
         │       ├── criar ──► Supabase + APScheduler + link GCal
         │       ├── listar ──► lista do Supabase
         │       ├── cancelar ──► remove do Supabase + APScheduler
         │       └── editar ──► atualiza Supabase + APScheduler
         │
-        └── conversa normal ──► classifica complexidade
+        └── 8. conversa normal
                     ├── SIMPLE ──► gpt-4.1
                     └── COMPLEX ──► gpt-5.4 (web search, image gen)
 ```
@@ -159,6 +169,7 @@ whatsapp-agent/
 │       ├── transcribe.py       # Transcrição de áudio via Whisper API + ffmpeg
 │       ├── refine.py           # Refinamento de transcrições via GPT-4o-mini
 │       ├── youtube.py          # Análise de vídeos YouTube via Gemini 2.5 Flash
+│       ├── webpage.py          # Leitura de páginas web via Jina Reader
 │       └── image_state.py      # Estado em memória para imagens pendentes (TTL 5min)
 ├── skills.md                   # Documentação das habilidades da Aisha
 ├── Dockerfile                  # Python 3.12 + ffmpeg
@@ -192,6 +203,7 @@ whatsapp-agent/
 | Lembretes (agendamento) | APScheduler 4.x async + SQLAlchemy |
 | Lembretes (parsing de datas) | dateparser (pt-BR nativo) |
 | Análise de vídeos YouTube | Google Gemini 2.5 Flash |
+| Leitura de páginas web | Jina Reader (r.jina.ai) |
 | HTTP client | httpx (async) |
 | Hosting | Railway (Docker) |
 
@@ -349,6 +361,7 @@ No painel de developers.facebook.com:
 | OpenAI GPT-4o-mini (refinamento de transcrição) | ~$0.001/msg |
 | OpenAI gpt-image-1.5 (imagem) | ~$0.02-0.08/imagem |
 | OpenAI web_search (busca) | ~$0.001/chamada |
+| Jina Reader (páginas web) | Gratuito |
 | Supabase | Gratuito (free tier) |
 | Railway | $0-25/mês (trial: $5 créditos grátis) |
 

@@ -424,6 +424,11 @@ O usuário enviou um documento. O conteúdo completo está abaixo. \
 Responda perguntas sobre ele com precisão, citando trechos quando relevante. \
 Se o usuário não fizer uma pergunta, faça um resumo estruturado."""
 
+_WEBPAGE_INSTRUCTIONS = """\
+O usuário enviou um link de página web. O conteúdo foi extraído abaixo em markdown. \
+Execute a instrução do usuário sobre esse conteúdo. \
+Se nenhuma instrução for dada, faça um resumo conciso e estruturado dos pontos principais."""
+
 
 async def chat_with_document(
     document_text: str,
@@ -458,4 +463,41 @@ async def chat_with_document(
         response_id=response.id,
     )
     log.info(f"Document chat result: text={bool(result.text)}, id={result.response_id}")
+    return result
+
+
+async def chat_with_webpage(
+    page_content: str,
+    url: str,
+    user_instruction: str | None,
+    previous_response_id: str | None = None,
+) -> ChatResult:
+    """Process a webpage's content with the user's instruction via gpt-4.1."""
+    user_message = f"URL: {url}\n\nCONTEÚDO:\n\n{page_content}"
+    if user_instruction:
+        user_message = f"INSTRUÇÃO: {user_instruction}\n\n{user_message}"
+
+    kwargs: dict = {
+        "model": "gpt-4.1",
+        "instructions": _build_instructions(f"{SYSTEM_PROMPT}\n\n{_WEBPAGE_INSTRUCTIONS}", None),
+        "input": user_message,
+    }
+    if previous_response_id:
+        kwargs["previous_response_id"] = previous_response_id
+
+    response = await _client.responses.create(**kwargs)
+
+    text_parts = [
+        content.text
+        for item in response.output
+        if item.type == "message"
+        for content in item.content
+        if content.type == "output_text"
+    ]
+
+    result = ChatResult(
+        text="\n".join(text_parts) if text_parts else None,
+        response_id=response.id,
+    )
+    log.info(f"Webpage chat result: text={bool(result.text)}, id={result.response_id}")
     return result

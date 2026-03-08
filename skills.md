@@ -290,7 +290,47 @@ Aisha: [análise completa do vídeo]
 
 ---
 
-## 10. Personalização e Perfil
+## 10. Leitura de Páginas Web
+
+A Aisha lê qualquer URL pública e processa o conteúdo conforme sua instrução. Basta enviar o link.
+
+### Enviar link com instrução (processa imediatamente)
+
+```
+https://g1.globo.com/noticia resume essa notícia
+https://www.bbc.com/news/article-123 traduz para português
+https://blog.exemplo.com/post quais são os pontos principais?
+```
+
+### Enviar só o link (Aisha pergunta o que fazer)
+
+```
+Você: https://g1.globo.com/noticia
+Aisha: 🔗 Link detectado! O que você quer que eu faça com essa página?
+
+Você: resume em tópicos
+Aisha: [resumo da notícia]
+```
+
+**Exemplos de instruções:**
+```
+"resume"
+"traduz para inglês"
+"quais os pontos principais?"
+"explica de forma simples"
+"extrai os dados mencionados"
+"faz um post para LinkedIn baseado nisso"
+"quem escreveu e quando foi publicado?"
+```
+
+**Observações:**
+- O link pendente expira após **10 minutos** sem instrução
+- Funciona com artigos, notícias, blogs, documentações e qualquer página com conteúdo textual público
+- Páginas que exigem login ou têm conteúdo gerado por JavaScript podem não funcionar
+
+---
+
+## 11. Personalização e Perfil
 
 A Aisha aprende sobre você e se adapta. Você pode definir um contexto pessoal, mudar o idioma da conversa, e consultar o que ela sabe sobre você.
 
@@ -329,7 +369,7 @@ A Aisha lista: contexto pessoal salvo, idioma preferido, lembretes ativos e esta
 
 ---
 
-## 11. Roteamento Automático de Modelo
+## 12. Roteamento Automático de Modelo
 
 A Aisha escolhe automaticamente o melhor modelo para cada mensagem — você não precisa fazer nada:
 
@@ -341,9 +381,10 @@ A Aisha escolhe automaticamente o melhor modelo para cada mensagem — você nã
 | Geração e edição de imagem | `gpt-5.4` + ferramenta `image_generation` |
 | Transcrição de áudio | `whisper-1` |
 | Refinamento de transcrição | `gpt-4o-mini` |
-| Extração de intenção de lembrete | `gpt-4o-mini` |
+| Extração de intenção de lembrete | `gpt-4.1-mini` |
 | Resumo de documentos PDF/DOCX | `gpt-4.1` |
 | Análise de vídeo YouTube | `gemini-2.5-flash` |
+| Leitura de páginas web | Jina Reader + `gpt-4.1` |
 
 ---
 
