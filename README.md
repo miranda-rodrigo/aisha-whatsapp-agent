@@ -4,8 +4,11 @@ Aisha é uma assistente pessoal inteligente que roda no WhatsApp Business API. E
 
 ## Funcionalidades
 
-### Conversa com IA (GPT-5.4)
-- Qualquer mensagem de texto vai direto para o modelo
+### Conversa com IA (roteamento automático de modelo)
+- Qualquer mensagem de texto vai direto para o chat
+- Um classificador leve (gpt-4.1-mini) decide qual modelo usar:
+  - **Simples** (saudações, perguntas diretas, bate-papo casual) → `gpt-4.1` — rápido e barato
+  - **Complexo** (raciocínio, pesquisa, geração de imagem, tarefas técnicas) → `gpt-5.4` — mais capaz
 - A Aisha responde de forma natural no idioma do usuário
 - Mantém contexto da conversa por até 10 minutos de inatividade
 - Para iniciar um novo assunto, diga: "nova conversa", "novo assunto", "mudar de assunto" ou "reset"
@@ -35,20 +38,26 @@ Aisha é uma assistente pessoal inteligente que roda no WhatsApp Business API. E
 ```
 Mensagem WhatsApp
         │
-        ├── Texto ──────────────────────────────► Chat (GPT-5.4)
+        ├── Texto ──────────────────────────────► Chat
         │
         └── Áudio ──► Whisper (transcrição)
                               │
-                              ├── contém "Aisha" ──► Chat (GPT-5.4)
+                              ├── contém "Aisha" ──► Chat
                               │
                               └── sem "Aisha" ────► Refinamento (GPT-4o-mini)
                                                      └── devolve transcrição
 
-Chat (GPT-5.4)
+Chat
         │
-        ├── usa web_search ──► resposta com info atualizada
-        ├── usa image_generation ──► envia imagem no WhatsApp
-        └── resposta direta ──► envia texto
+        └── gpt-4.1-mini (classifica complexidade)
+                    │
+                    ├── SIMPLE ──► gpt-4.1
+                    │               └── resposta direta
+                    │
+                    └── COMPLEX ──► gpt-5.4
+                                    ├── usa web_search ──► resposta com info atualizada
+                                    ├── usa image_generation ──► envia imagem no WhatsApp
+                                    └── resposta direta
 ```
 
 ## Memória de Sessão
@@ -65,9 +74,9 @@ A Aisha mantém contexto de conversa usando a Responses API da OpenAI com `previ
 
 ```
 whatsapp-agent/
-├── app.py          # FastAPI: webhook, roteamento de mensagens, envio de respostas
-├── chat.py         # Skill de conversa via Responses API (GPT-5.4)
-├── session.py      # Gerenciamento de sessões no Supabase
+├── app.py          # FastAPI: webhook, roteamento de mensagens, envio de respostas e imagens
+├── chat.py         # Skill de conversa: classificador + gpt-4.1 (simples) + gpt-5.4 (complexo)
+├── session.py      # Gerenciamento de sessões no Supabase (previous_response_id + TTL 10min)
 ├── transcribe.py   # Transcrição de áudio via Whisper API + ffmpeg
 ├── refine.py       # Refinamento de transcrições via GPT-4o-mini
 ├── config.py       # Variáveis de ambiente
@@ -83,8 +92,10 @@ whatsapp-agent/
 | Linguagem | Python 3.12 |
 | Framework | FastAPI + uvicorn |
 | WhatsApp | Meta Cloud API (WhatsApp Business) |
-| LLM (chat) | OpenAI GPT-5.4 via Responses API |
-| LLM (refinamento) | OpenAI GPT-4o-mini |
+| LLM classificador | OpenAI gpt-4.1-mini (detecta complexidade) |
+| LLM chat simples | OpenAI gpt-4.1 via Responses API |
+| LLM chat complexo | OpenAI gpt-5.4 via Responses API |
+| LLM refinamento | OpenAI gpt-4o-mini |
 | Transcrição | OpenAI Whisper (whisper-1) |
 | Geração de imagem | gpt-image-1.5 |
 | Busca na web | Ferramenta nativa da Responses API |
@@ -203,8 +214,10 @@ No painel de developers.facebook.com:
 |---|---|
 | WhatsApp Cloud API (service messages) | Gratuito |
 | OpenAI Whisper (transcrição de áudio) | ~$0.006/min |
-| OpenAI GPT-4o-mini (refinamento) | ~$0.001/msg |
-| OpenAI GPT-5.4 (chat) | ~$0.003-0.015/msg |
+| OpenAI gpt-4.1-mini (classificador de complexidade) | ~$0.00001/msg |
+| OpenAI gpt-4.1 (chat simples) | ~$0.001/msg |
+| OpenAI gpt-5.4 (chat complexo) | ~$0.005-0.015/msg |
+| OpenAI GPT-4o-mini (refinamento de transcrição) | ~$0.001/msg |
 | OpenAI gpt-image-1.5 (imagem) | ~$0.02-0.08/imagem |
 | OpenAI web_search (busca) | ~$0.001/chamada |
 | Supabase | Gratuito (free tier) |
