@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, Query, Request
 
-from chat import chat
+from chat import chat, wants_new_session
 from config import (
     ALLOWED_NUMBERS,
     GRAPH_API_URL,
@@ -13,6 +13,7 @@ from config import (
     WHATSAPP_TOKEN,
 )
 from refine import refine_transcription
+from session import delete_session, get_response_id, upsert_session
 from transcribe import transcribe_audio_bytes
 
 logging.basicConfig(
@@ -110,7 +111,16 @@ def _strip_aisha(text: str) -> str:
 async def handle_chat(sender: str, text: str):
     """Routes a text message through Aisha chat and sends the response."""
     try:
-        result = await chat(text)
+        if wants_new_session(text):
+            await delete_session(sender)
+            log.info(f"Session reset requested by {sender}")
+
+        prev_id = await get_response_id(sender)
+        result = await chat(text, previous_response_id=prev_id)
+
+        if result.response_id:
+            await upsert_session(sender, result.response_id)
+
         if result.image_bytes:
             await send_image(sender, result.image_bytes)
         if result.text:

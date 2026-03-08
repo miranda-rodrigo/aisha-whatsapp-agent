@@ -4,7 +4,10 @@ from dotenv import load_dotenv
 
 load_dotenv(override=False)
 
-REQUIRED = ["WHATSAPP_TOKEN", "WHATSAPP_PHONE_ID", "WEBHOOK_VERIFY_TOKEN", "OPENAI_API_KEY"]
+REQUIRED = [
+    "WHATSAPP_TOKEN", "WHATSAPP_PHONE_ID", "WEBHOOK_VERIFY_TOKEN",
+    "OPENAI_API_KEY", "SUPABASE_URL", "SUPABASE_KEY",
+]
 missing = [v for v in REQUIRED if v not in os.environ]
 if missing:
     print(f"FATAL: Missing env vars: {missing}", file=sys.stderr)
@@ -16,6 +19,11 @@ WHATSAPP_PHONE_ID = os.environ["WHATSAPP_PHONE_ID"]
 WEBHOOK_VERIFY_TOKEN = os.environ["WEBHOOK_VERIFY_TOKEN"]
 OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_KEY = os.environ["SUPABASE_KEY"]
+
 ALLOWED_NUMBERS = set(os.environ.get("ALLOWED_NUMBERS", "").split(","))
 
 GRAPH_API_URL = f"https://graph.facebook.com/v22.0/{WHATSAPP_PHONE_ID}"
+
+SESSION_TIMEOUT_MINUTES = 10

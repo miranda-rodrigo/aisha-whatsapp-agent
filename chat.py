@@ -2,6 +2,7 @@
 
 import base64
 import logging
+import re
 from dataclasses import dataclass
 
 from openai import AsyncOpenAI
@@ -14,6 +15,15 @@ SYSTEM_PROMPT = """\
 Você é Aisha, uma assistente pessoal inteligente e amigável. \
 Responda de forma objetiva e útil. Use o idioma do usuário."""
 
+_NEW_SESSION_PATTERNS = [
+    r"\bnova conversa\b",
+    r"\bnovo assunto\b",
+    r"\bmudar de assunto\b",
+    r"\breseta\b",
+    r"\breset\b",
+    r"\bvamos falar sobre outra coisa\b",
+]
+
 _client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
 
@@ -21,21 +31,38 @@ _client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 class ChatResult:
     text: str | None = None
     image_bytes: bytes | None = None
+    response_id: str | None = None
 
 
-async def chat(user_input: str) -> ChatResult:
+def wants_new_session(text: str) -> bool:
+    """Check if the user is explicitly requesting a fresh conversation."""
+    for pattern in _NEW_SESSION_PATTERNS:
+        if re.search(pattern, text, re.IGNORECASE):
+            return True
+    return False
+
+
+async def chat(
+    user_input: str,
+    previous_response_id: str | None = None,
+) -> ChatResult:
     """Send user input to GPT-5.4 with web_search and image_generation tools."""
-    log.info(f"Chat request: {user_input[:120]}")
+    log.info(f"Chat request: {user_input[:120]} (prev={previous_response_id})")
 
-    response = await _client.responses.create(
-        model="gpt-5.4",
-        instructions=SYSTEM_PROMPT,
-        input=user_input,
-        tools=[
+    kwargs: dict = {
+        "model": "gpt-5.4",
+        "instructions": SYSTEM_PROMPT,
+        "input": user_input,
+        "tools": [
             {"type": "web_search"},
             {"type": "image_generation"},
         ],
-    )
+    }
+
+    if previous_response_id:
+        kwargs["previous_response_id"] = previous_response_id
+
+    response = await _client.responses.create(**kwargs)
 
     text_parts: list[str] = []
     image_bytes: bytes | None = None
@@ -51,6 +78,10 @@ async def chat(user_input: str) -> ChatResult:
     result = ChatResult(
         text="\n".join(text_parts) if text_parts else None,
         image_bytes=image_bytes,
+        response_id=response.id,
     )
-    log.info(f"Chat result: text={bool(result.text)}, image={bool(result.image_bytes)}")
+    log.info(
+        f"Chat result: text={bool(result.text)}, "
+        f"image={bool(result.image_bytes)}, id={result.response_id}"
+    )
     return result
