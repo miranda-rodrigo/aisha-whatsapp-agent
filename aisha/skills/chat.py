@@ -64,7 +64,7 @@ Execute a instrução do usuário sobre a imagem. Isso pode incluir: melhorar a 
 editar elementos, mudar estilo, gerar uma nova imagem baseada nesta, descrever a imagem, \
 extrair texto, remover fundo, etc. Use a ferramenta de geração de imagem quando apropriado."""
 
-_skills_path = Path(__file__).parents[2] / "docs" / "skills.md"
+_skills_path = Path(__file__).parents[2] / "skills.md"
 _SKILLS_CONTENT: str = _skills_path.read_text(encoding="utf-8") if _skills_path.exists() else ""
 
 _SELF_INSTRUCTIONS = f"""\

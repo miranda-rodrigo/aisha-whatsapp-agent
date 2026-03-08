@@ -1,6 +1,8 @@
 import logging
+import logging.handlers
 import re
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 from apscheduler import AsyncScheduler
@@ -33,9 +35,22 @@ from aisha.skills.youtube import (
     strip_youtube_url,
 )
 
+_log_handlers: list[logging.Handler] = [logging.StreamHandler()]
+_log_dir = Path(__file__).parents[1] / "logs"
+if _log_dir.exists():
+    _log_handlers.append(
+        logging.handlers.RotatingFileHandler(
+            _log_dir / "aisha.log",
+            maxBytes=5 * 1024 * 1024,
+            backupCount=3,
+            encoding="utf-8",
+        )
+    )
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=_log_handlers,
 )
 log = logging.getLogger(__name__)
 
