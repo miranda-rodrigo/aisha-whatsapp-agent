@@ -58,7 +58,10 @@ Aisha é uma assistente pessoal inteligente que roda no WhatsApp Business API. E
 - Envie um PDF ou DOCX e a Aisha resume automaticamente
 - Para instruções específicas, envie o documento com legenda (ex: "extraia os valores")
 - O contexto do documento é persistido na sessão — perguntas de follow-up funcionam
-- Suporta documentos de até 20 MB
+- Suporta documentos de até 50 MB
+- **PDFs escaneados (imagem):** detectados automaticamente e processados via OCR com visão do modelo (gpt-4.1), sem perda de conteúdo
+- **PDFs nativos (texto):** extração direta via pymupdf4llm, sem custo de visão
+- **DOCX:** extrai parágrafos e tabelas preservando a estrutura do documento
 
 ### Análise de Vídeos do YouTube (Gemini 2.5 Flash)
 - Envie qualquer link do YouTube e a Aisha analisa o vídeo diretamente
@@ -134,7 +137,10 @@ Mensagem WhatsApp
         ├── Imagem ──┬── com legenda ──► Processa imagem com legenda como instrução
         │            └── sem legenda ──► Armazena imagem + pergunta o que fazer
         │
-        └── Documento ──► Extrai texto + resume / responde instrução
+        └── Documento ──► Detecta tipo
+                              ├── PDF nativo ──► pymupdf4llm ──► gpt-4.1 resume/responde
+                              ├── PDF escaneado ──► visão gpt-4.1 (OCR) ──► gpt-4.1 resume/responde
+                              └── DOCX ──► python-docx (parágrafos + tabelas) ──► gpt-4.1 resume/responde
                               └── contexto persistido para follow-ups
 
 handle_chat (texto)
@@ -405,6 +411,7 @@ No painel de developers.facebook.com:
 | OpenAI Whisper (transcrição de áudio) | ~$0.006/min |
 | OpenAI gpt-4.1-mini (classificador de complexidade) | ~$0.00001/msg |
 | OpenAI gpt-4.1 (chat simples + self + docs) | ~$0.001/msg |
+| OpenAI gpt-4.1 vision (OCR de PDFs escaneados) | ~$0.01–$0.05/doc (varia por nº de páginas) |
 | OpenAI gpt-5.4 (chat complexo) | ~$0.005-0.015/msg |
 | OpenAI GPT-4o-mini (refinamento de transcrição) | ~$0.001/msg |
 | OpenAI gpt-image-1.5 (imagem) | ~$0.02-0.08/imagem |

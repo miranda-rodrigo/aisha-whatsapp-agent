@@ -507,7 +507,7 @@ async def handle_document(sender: str, message: dict):
             await send_message(
                 sender,
                 "Não consegui extrair texto deste documento. "
-                "Ele pode ser um PDF escaneado (imagem) ou estar protegido.",
+                "Ele pode estar protegido por senha ou corrompido.",
             )
             return
 
