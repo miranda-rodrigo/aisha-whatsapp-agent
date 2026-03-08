@@ -10,7 +10,7 @@ from apscheduler.datastores.sqlalchemy import SQLAlchemyDataStore
 from fastapi import FastAPI, Query, Request
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from aisha.skills.chat import chat, chat_with_document, chat_with_image, wants_new_session
+from aisha.skills.chat import chat, chat_with_document, chat_with_image, classify, wants_new_session
 from aisha.config import (
     ALLOWED_NUMBERS,
     DATABASE_PASSWORD,
@@ -210,22 +210,29 @@ async def handle_chat(sender: str, text: str):
                 )
             return
 
-        # 4. Reminder intent
-        if is_reminder_intent(text):
-            log.info(f"Reminder intent detected for {sender}")
-            reply = await handle_reminder(sender, text, scheduler)
-            if "✅ Lembrete criado" in reply:
-                await increment_stat(sender, "reminders_created")
-            await send_message(sender, reply)
-            return
+        # 4. Classify intent (LLM) — SELF goes straight to chat, skipping skill routers
+        complexity = await classify(text)
+        log.info(f"Classified as {complexity}: {text[:80]}")
 
-        # 5. Normal chat
+        if complexity != "SELF":
+            # 5. Reminder intent (only when not a capability/self question)
+            if is_reminder_intent(text):
+                log.info(f"Reminder intent detected for {sender}")
+                reply = await handle_reminder(sender, text, scheduler)
+                if "✅ Lembrete criado" in reply:
+                    await increment_stat(sender, "reminders_created")
+                await send_message(sender, reply)
+                return
+
+        # 6. Chat (SELF / SIMPLE / COMPLEX)
         if wants_new_session(text):
             await delete_session(sender)
             log.info(f"Session reset requested by {sender}")
 
         prev_id = await get_response_id(sender)
-        result = await chat(text, previous_response_id=prev_id, phone=sender)
+        result = await chat(
+            text, previous_response_id=prev_id, phone=sender, complexity=complexity,
+        )
 
         if result.response_id:
             await upsert_session(sender, result.response_id)

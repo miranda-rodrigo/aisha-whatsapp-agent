@@ -78,27 +78,8 @@ For recurring patterns, also fill rrule using RFC 5545 (e.g. "FREQ=DAILY", "FREQ
 lead_minutes defaults to {REMINDER_LEAD_MINUTES} unless the user specifies otherwise."""
 
 
-_CAPABILITY_QUESTION_PATTERNS = [
-    r"\bvoc[eê]\s+(pode|consegue|sabe|faz|tem)\b",
-    r"\bd[aá]\s+pra\b",
-    r"\bé\s+poss[íi]vel\b",
-    r"\bcomo\s+(funciona|uso|usar|criar|fazer|crio|fa[çc]o)\b",
-    r"\btem\s+(a\s+fun[çc][aã]o|suporte|recurso)\b",
-]
-
-
-def _is_capability_question(text: str) -> bool:
-    """Return True when the user is asking whether Aisha *can* do something."""
-    for pattern in _CAPABILITY_QUESTION_PATTERNS:
-        if re.search(pattern, text, re.IGNORECASE):
-            return True
-    return False
-
-
 def is_reminder_intent(text: str) -> bool:
     """Fast regex check before calling the LLM."""
-    if _is_capability_question(text):
-        return False
     for pattern in _REMINDER_PATTERNS:
         if re.search(pattern, text, re.IGNORECASE):
             return True

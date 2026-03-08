@@ -45,7 +45,11 @@ how to use a feature, her limitations, who she is, how she works. \
 This includes questions like "o que você faz?", "você consegue X?", \
 "como funciona a transcrição?", "quais são seus skills?", "quem é você?", \
 "como envio um documento?", "você pode criar lembretes?", \
-"você analisa vídeos do YouTube?".
+"você analisa vídeos do YouTube?", "posso modificar um lembrete?", \
+"como edito um lembrete?", "dá pra mudar o horário?", \
+"como cancelo?", "você faz lembretes recorrentes?", \
+"como funciona o lembrete?", "quais são as funções?", \
+"o que mais você sabe fazer?", "me explica como usar".
 
 Reply with exactly one word: SIMPLE, COMPLEX, or SELF."""
 
@@ -123,7 +127,7 @@ def wants_new_session(text: str) -> bool:
     return False
 
 
-async def _classify(user_input: str) -> str:
+async def classify(user_input: str) -> str:
     """Return 'SIMPLE', 'COMPLEX', or 'SELF' using gpt-4.1-mini as a cheap classifier."""
     response = await _client.chat.completions.create(
         model="gpt-4.1-mini",
@@ -170,12 +174,14 @@ async def chat(
     user_input: str,
     previous_response_id: str | None = None,
     phone: str | None = None,
+    complexity: str | None = None,
 ) -> ChatResult:
     """Route to gpt-4.1, gpt-5.4, or self-awareness handler based on message classification."""
     from aisha.user_profile import get_profile
 
     profile = await get_profile(phone) if phone else None
-    complexity = await _classify(user_input)
+    if complexity is None:
+        complexity = await classify(user_input)
     log.info(f"Chat [{complexity}]: {user_input[:120]} (prev={previous_response_id})")
 
     if complexity == "SELF":
