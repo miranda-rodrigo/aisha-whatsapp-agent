@@ -3,16 +3,22 @@ import re
 from contextlib import asynccontextmanager
 
 import httpx
+from apscheduler import AsyncScheduler
+from apscheduler.datastores.sqlalchemy import SQLAlchemyDataStore
 from fastapi import FastAPI, Query, Request
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from chat import chat, wants_new_session
 from config import (
     ALLOWED_NUMBERS,
     GRAPH_API_URL,
+    SUPABASE_URL,
+    SUPABASE_KEY,
     WEBHOOK_VERIFY_TOKEN,
     WHATSAPP_TOKEN,
 )
 from refine import refine_transcription
+from reminder import handle_reminder, is_reminder_intent
 from session import delete_session, get_response_id, upsert_session
 from transcribe import transcribe_audio_bytes
 
@@ -23,19 +29,39 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 http_client: httpx.AsyncClient
+scheduler: AsyncScheduler
 processed_messages: set[str] = set()
 MAX_PROCESSED_CACHE = 1000
+
+# Build Postgres connection URL from Supabase URL
+# Supabase URL: https://xxxxx.supabase.co
+# Postgres URL: postgresql+asyncpg://postgres.xxxxx:KEY@aws-0-sa-east-1.pooler.supabase.com:5432/postgres
+# We use the Transaction pooler via the REST URL host.
+_project_ref = SUPABASE_URL.replace("https://", "").split(".")[0]
+_DB_URL = (
+    f"postgresql+asyncpg://postgres.{_project_ref}:{SUPABASE_KEY}"
+    f"@aws-0-sa-east-1.pooler.supabase.com:6543/postgres"
+)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global http_client
+    global http_client, scheduler
+
     http_client = httpx.AsyncClient(
         headers={"Authorization": f"Bearer {WHATSAPP_TOKEN}"},
         timeout=60.0,
     )
-    log.info("WhatsApp agent started")
-    yield
+
+    engine = create_async_engine(_DB_URL, pool_pre_ping=True)
+    data_store = SQLAlchemyDataStore(engine)
+    async with AsyncScheduler(data_store=data_store) as sched:
+        scheduler = sched
+        await sched.start_in_background()
+        log.info("APScheduler started")
+        log.info("WhatsApp agent started")
+        yield
+
     await http_client.aclose()
 
 
@@ -109,8 +135,14 @@ def _strip_aisha(text: str) -> str:
 
 
 async def handle_chat(sender: str, text: str):
-    """Routes a text message through Aisha chat and sends the response."""
+    """Routes a text message through Aisha chat (or reminder skill) and sends the response."""
     try:
+        if is_reminder_intent(text):
+            log.info(f"Reminder intent detected for {sender}")
+            reply = await handle_reminder(sender, text, scheduler)
+            await send_message(sender, reply)
+            return
+
         if wants_new_session(text):
             await delete_session(sender)
             log.info(f"Session reset requested by {sender}")

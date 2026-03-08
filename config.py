@@ -27,3 +27,6 @@ ALLOWED_NUMBERS = set(os.environ.get("ALLOWED_NUMBERS", "").split(","))
 GRAPH_API_URL = f"https://graph.facebook.com/v22.0/{WHATSAPP_PHONE_ID}"
 
 SESSION_TIMEOUT_MINUTES = 10
+
+USER_TIMEZONE = os.environ.get("USER_TIMEZONE", "America/Sao_Paulo")
+REMINDER_LEAD_MINUTES = int(os.environ.get("REMINDER_LEAD_MINUTES", "15"))
