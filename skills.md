@@ -413,7 +413,40 @@ A Aisha lista: contexto pessoal salvo, idioma preferido, lembretes ativos e esta
 
 ---
 
-## 13. Roteamento Automático de Modelo
+## 13. Download de Vídeo
+
+Envie um link do YouTube ou X/Twitter junto com uma palavra de download e a Aisha gera um link temporário para você baixar o vídeo.
+
+**Como usar:**
+```
+"baixa esse vídeo: https://youtu.be/xxxx"
+"https://x.com/user/status/123 me manda esse vídeo"
+"download: https://www.youtube.com/watch?v=xxxx"
+
+[após enviar um link do YouTube sem instrução]
+Aisha: 🎬 Link do YouTube detectado! O que você quer...
+Você: baixa o vídeo
+```
+
+**Funciona com:**
+- YouTube (`youtube.com`, `youtu.be`)
+- X/Twitter (`x.com`, `twitter.com`)
+
+**Sobre o link de download:**
+- É um link temporário que expira em **30 minutos**
+- Resolução máxima: 720p (para manter o arquivo menor)
+- Funciona apenas enquanto o servidor estiver rodando
+
+**Palavras que ativam o download:**
+`baixa`, `baixar`, `download`, `salva`, `salvar`, `me manda`, `manda`, `pega`
+
+**Limitações:**
+- Vídeos protegidos ou privados não podem ser baixados
+- X/Twitter pode falhar em tweets específicos com proteção da plataforma
+
+---
+
+## 14. Roteamento Automático de Modelo
 
 A Aisha escolhe automaticamente o melhor modelo para cada mensagem — você não precisa fazer nada:
 
