@@ -12,14 +12,16 @@ Routing strategy:
 import base64
 import logging
 import re
+import zoneinfo
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
-from aisha.config import OPENAI_API_KEY
+from aisha.config import OPENAI_API_KEY, USER_TIMEZONE
 
 log = logging.getLogger(__name__)
 
@@ -138,15 +140,29 @@ async def _classify(user_input: str) -> str:
     return "SIMPLE" if label.startswith("SIMPLE") else "COMPLEX"
 
 
+_WEEKDAYS = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"]
+_MONTHS = ["", "janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"]
+
+
+def _now_str() -> str:
+    """Current datetime formatted in Portuguese, locale-independent."""
+    now = datetime.now(zoneinfo.ZoneInfo(USER_TIMEZONE))
+    wd = _WEEKDAYS[now.weekday()]
+    month = _MONTHS[now.month]
+    return f"{wd}, {now.day} de {month} de {now.year}, {now.strftime('%H:%M')}"
+
+
 def _build_instructions(base: str, profile: dict | None) -> str:
-    """Append user profile context and language preference to base instructions."""
-    if not profile:
-        return base
-    parts = [base]
-    if profile.get("personal_context"):
-        parts.append(f"\nContexto pessoal do usuário:\n{profile['personal_context']}")
-    if profile.get("language"):
-        parts.append(f"\nIdioma preferido do usuário: {profile['language']}. Responda nesse idioma.")
+    """Append current datetime and user profile context to base instructions."""
+    parts = [
+        base,
+        f"\nData/hora atual: {_now_str()} ({USER_TIMEZONE}).",
+    ]
+    if profile:
+        if profile.get("personal_context"):
+            parts.append(f"\nContexto pessoal do usuário:\n{profile['personal_context']}")
+        if profile.get("language"):
+            parts.append(f"\nIdioma preferido do usuário: {profile['language']}. Responda nesse idioma.")
     return "\n".join(parts)
 
 
@@ -365,7 +381,7 @@ async def chat_with_image(
 
     kwargs: dict = {
         "model": "gpt-5.4",
-        "instructions": f"{SYSTEM_PROMPT}\n\n{_IMAGE_INSTRUCTIONS}",
+        "instructions": _build_instructions(f"{SYSTEM_PROMPT}\n\n{_IMAGE_INSTRUCTIONS}", None),
         "input": multimodal_input,
         "tools": [{"type": "image_generation"}],
     }
@@ -415,7 +431,7 @@ async def chat_with_document(
 
     kwargs: dict = {
         "model": "gpt-4.1",
-        "instructions": f"{SYSTEM_PROMPT}\n\n{_DOCUMENT_INSTRUCTIONS}",
+        "instructions": _build_instructions(f"{SYSTEM_PROMPT}\n\n{_DOCUMENT_INSTRUCTIONS}", None),
         "input": user_message,
     }
     if previous_response_id:
