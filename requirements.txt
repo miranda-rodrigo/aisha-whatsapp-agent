@@ -8,3 +8,5 @@ google-genai>=1.0
 dateparser>=1.2
 sqlalchemy[asyncio]>=2.0
 asyncpg>=0.29
+pymupdf4llm>=0.0.17
+python-docx>=1.1

@@ -17,6 +17,7 @@ from config import (
     WEBHOOK_VERIFY_TOKEN,
     WHATSAPP_TOKEN,
 )
+from document import extract_text_async, is_supported_document, summarize_document, MAX_DOCUMENT_SIZE
 from image_state import clear_pending_image, get_pending_image, store_pending_image
 from refine import refine_transcription
 from reminder import handle_reminder, is_reminder_intent
@@ -131,6 +132,8 @@ async def receive_webhook(request: Request):
         await handle_chat(sender, text)
     elif msg_type == "image":
         await handle_image(sender, message)
+    elif msg_type == "document":
+        await handle_document(sender, message)
     else:
         await send_message(sender, f"Tipo '{msg_type}' ainda não suportado.")
 
@@ -304,6 +307,64 @@ async def handle_image(sender: str, message: dict):
     except Exception as e:
         log.exception("Image handling failed")
         await send_message(sender, f"Erro ao processar imagem: {e}")
+
+
+async def handle_document(sender: str, message: dict):
+    """Downloads a document from WhatsApp, extracts text, and summarizes it."""
+    doc = message["document"]
+    doc_id = doc["id"]
+    mime_type = doc.get("mime_type", "")
+    filename = doc.get("filename", "document")
+    log.info(f"Document received: {filename} ({mime_type}), id={doc_id}")
+
+    try:
+        if not is_supported_document(mime_type):
+            await send_message(
+                sender,
+                f"Formato não suportado: _{filename}_\n\n"
+                "Formatos aceitos: *PDF* e *Word (.docx)*",
+            )
+            return
+
+        media_resp = await http_client.get(
+            f"https://graph.facebook.com/v22.0/{doc_id}"
+        )
+        media_resp.raise_for_status()
+        media_url = media_resp.json()["url"]
+
+        doc_resp = await http_client.get(media_url)
+        doc_resp.raise_for_status()
+        doc_bytes = doc_resp.content
+
+        log.info(f"Document downloaded: {len(doc_bytes)} bytes")
+
+        if len(doc_bytes) > MAX_DOCUMENT_SIZE:
+            await send_message(
+                sender,
+                "O documento é muito grande (máx. 50 MB). Envie um arquivo menor.",
+            )
+            return
+
+        await send_message(sender, "📄 Processando documento...")
+
+        document_text = await extract_text_async(doc_bytes, mime_type)
+        log.info(f"Text extracted: {len(document_text)} chars from {filename}")
+
+        if not document_text.strip():
+            await send_message(
+                sender,
+                "Não consegui extrair texto deste documento. "
+                "Ele pode ser um PDF escaneado (imagem) ou estar protegido.",
+            )
+            return
+
+        caption = doc.get("caption", "").strip()
+        summary = await summarize_document(document_text, caption or None)
+        await send_message(sender, summary)
+
+    except Exception as e:
+        log.exception("Document processing failed")
+        await send_message(sender, f"Erro ao processar documento: {e}")
 
 
 async def _process_image_instruction(sender: str, instruction: str, pending):
