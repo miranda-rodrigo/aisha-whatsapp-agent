@@ -1,6 +1,6 @@
 # Aisha — Assistente Pessoal via WhatsApp
 
-Aisha é uma assistente pessoal inteligente que roda no WhatsApp Business API. Ela conversa, transcreve áudios, pesquisa na web, gera imagens e mantém contexto de conversa — tudo pelo WhatsApp.
+Aisha é uma assistente pessoal inteligente que roda no WhatsApp Business API. Ela conversa, transcreve áudios, pesquisa na web, gera imagens, cria lembretes e mantém contexto de conversa — tudo pelo WhatsApp.
 
 ## Funcionalidades
 
@@ -33,6 +33,28 @@ Aisha é uma assistente pessoal inteligente que roda no WhatsApp Business API. E
 - Exemplo: "Aisha, gera uma imagem de um pôr do sol na praia"
 - A imagem é enviada diretamente no WhatsApp
 
+### Lembretes
+- Criação via linguagem natural em português
+- Aviso enviado por WhatsApp X minutos antes do evento (padrão: 15 min)
+- Link gerado automaticamente para adicionar ao Google Calendar
+- Suporte a lembretes recorrentes ("todo dia às 9h", "toda segunda às 7h")
+- Gerenciamento completo: listar, cancelar e editar lembretes
+
+**Exemplos:**
+```
+"Aisha me lembra da reunião amanhã com João às 10h"
+→ ✅ Lembrete criado! + link Google Calendar
+
+"quais são meus lembretes?"
+→ 📋 1. Reunião com João — 09/03 às 10:00
+
+"cancela o lembrete 1"
+→ ✅ Lembrete cancelado
+
+"muda o lembrete 1 para as 11h"
+→ ✅ Lembrete atualizado para 09/03 às 11:00
+```
+
 ## Fluxo de Mensagens
 
 ```
@@ -49,7 +71,13 @@ Mensagem WhatsApp
 
 Chat
         │
-        └── gpt-4.1-mini (classifica complexidade)
+        ├── menciona lembrete ──► reminder.py
+        │                              ├── criar ──► Supabase + APScheduler + link GCal
+        │                              ├── listar ──► lista do Supabase
+        │                              ├── cancelar ──► remove do Supabase + APScheduler
+        │                              └── editar ──► atualiza Supabase + APScheduler
+        │
+        └── conversa normal ──► gpt-4.1-mini (classifica complexidade)
                     │
                     ├── SIMPLE ──► gpt-4.1
                     │               └── resposta direta
@@ -74,15 +102,17 @@ A Aisha mantém contexto de conversa usando a Responses API da OpenAI com `previ
 
 ```
 whatsapp-agent/
-├── app.py          # FastAPI: webhook, roteamento de mensagens, envio de respostas e imagens
-├── chat.py         # Skill de conversa: classificador + gpt-4.1 (simples) + gpt-5.4 (complexo)
-├── session.py      # Gerenciamento de sessões no Supabase (previous_response_id + TTL 10min)
-├── transcribe.py   # Transcrição de áudio via Whisper API + ffmpeg
-├── refine.py       # Refinamento de transcrições via GPT-4o-mini
-├── config.py       # Variáveis de ambiente
-├── Dockerfile      # Python 3.12 + ffmpeg
+├── app.py              # FastAPI: webhook, roteamento, APScheduler lifespan
+├── chat.py             # Skill de conversa: classificador + gpt-4.1 + gpt-5.4
+├── reminder.py         # Skill de lembretes: parsing LLM, agendamento, Google Calendar
+├── reminder_store.py   # CRUD Supabase para tabela reminders
+├── session.py          # Gerenciamento de sessões no Supabase (TTL 10min)
+├── transcribe.py       # Transcrição de áudio via Whisper API + ffmpeg
+├── refine.py           # Refinamento de transcrições via GPT-4o-mini
+├── config.py           # Variáveis de ambiente
+├── Dockerfile          # Python 3.12 + ffmpeg
 ├── requirements.txt
-└── .env            # Variáveis locais (não vai pro deploy)
+└── .env                # Variáveis locais (não vai pro deploy)
 ```
 
 ## Stack
@@ -101,6 +131,8 @@ whatsapp-agent/
 | Busca na web | Ferramenta nativa da Responses API |
 | Conversão de áudio | ffmpeg |
 | Sessões | Supabase (PostgreSQL) |
+| Lembretes (agendamento) | APScheduler 4.x async + SQLAlchemy |
+| Lembretes (parsing de datas) | dateparser (pt-BR nativo) |
 | HTTP client | httpx (async) |
 | Hosting | Railway (Docker) |
 
@@ -118,6 +150,7 @@ whatsapp-agent/
 No SQL Editor do Supabase, execute:
 
 ```sql
+-- Tabela de sessões de conversa
 CREATE TABLE sessions (
     phone TEXT PRIMARY KEY,
     response_id TEXT NOT NULL,
@@ -125,6 +158,26 @@ CREATE TABLE sessions (
 );
 
 ALTER TABLE sessions DISABLE ROW LEVEL SECURITY;
+
+-- Tabela de lembretes
+CREATE TABLE reminders (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    phone        TEXT NOT NULL,
+    message      TEXT NOT NULL,
+    scheduled_at TIMESTAMPTZ NOT NULL,
+    timezone     TEXT NOT NULL DEFAULT 'America/Sao_Paulo',
+    status       TEXT NOT NULL DEFAULT 'pending'
+                     CHECK (status IN ('pending', 'sent', 'cancelled', 'failed')),
+    is_recurring BOOLEAN NOT NULL DEFAULT FALSE,
+    rrule        TEXT,
+    job_id       TEXT UNIQUE,
+    created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_reminders_phone_status ON reminders (phone, status);
+CREATE INDEX idx_reminders_scheduled    ON reminders (scheduled_at) WHERE status = 'pending';
+
+ALTER TABLE reminders DISABLE ROW LEVEL SECURITY;
 ```
 
 ### 3. Variáveis de ambiente
@@ -139,6 +192,8 @@ OPENAI_API_KEY=sk-...
 ALLOWED_NUMBERS=5511999999999,5585999999999
 SUPABASE_URL=https://xxxxx.supabase.co
 SUPABASE_KEY=sb_publishable_... ou sb_secret_...
+USER_TIMEZONE=America/Sao_Paulo
+REMINDER_LEAD_MINUTES=15
 ```
 
 | Variável | Descrição |
@@ -150,6 +205,8 @@ SUPABASE_KEY=sb_publishable_... ou sb_secret_...
 | `ALLOWED_NUMBERS` | Números autorizados separados por vírgula (formato sem + e sem espaços) |
 | `SUPABASE_URL` | URL do projeto Supabase (ex: `https://xxxxx.supabase.co`) |
 | `SUPABASE_KEY` | Publishable ou Secret key do Supabase |
+| `USER_TIMEZONE` | Timezone do usuário para lembretes (padrão: `America/Sao_Paulo`) |
+| `REMINDER_LEAD_MINUTES` | Minutos de antecedência para o aviso do lembrete (padrão: `15`) |
 | `PORT` | Porta do servidor (Railway injeta automaticamente; padrão: 8000) |
 
 ### 4. Rodar localmente
