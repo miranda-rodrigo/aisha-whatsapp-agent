@@ -75,7 +75,11 @@ async def lifespan(app: FastAPI):
         timeout=60.0,
     )
 
-    engine = create_async_engine(_DB_URL, pool_pre_ping=True)
+    engine = create_async_engine(
+        _DB_URL,
+        pool_pre_ping=True,
+        connect_args={"statement_cache_size": 0},
+    )
     data_store = SQLAlchemyDataStore(engine)
     async with AsyncScheduler(data_store=data_store) as sched:
         scheduler = sched
