@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import logging.handlers
@@ -10,19 +11,33 @@ from pathlib import Path
 import httpx
 from apscheduler import AsyncScheduler
 from apscheduler.datastores.sqlalchemy import SQLAlchemyDataStore
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from aisha.skills.chat import chat, chat_with_document, chat_with_image, chat_with_webpage, classify, wants_new_session
 from aisha.config import (
     ALLOWED_NUMBERS,
+    BASE_URL,
     DATABASE_PASSWORD,
     GRAPH_API_URL,
     SUPABASE_URL,
     WEBHOOK_VERIFY_TOKEN,
     WHATSAPP_TOKEN,
 )
-from aisha.skills.document import extract_text_async, is_supported_document, MAX_DOCUMENT_SIZE
+from aisha.skills.document import (
+    extract_text_async,
+    extract_scanned_pages,
+    get_pdf_info,
+    is_supported_document,
+    MAX_DOCUMENT_SIZE,
+    MAX_SCANNED_PAGES,
+)
+from aisha.skills.document_state import (
+    clear_pending_document,
+    get_pending_document,
+    store_pending_document,
+)
 from aisha.skills.image_state import clear_pending_image, get_pending_image, store_pending_image
 from aisha.skills.refine import refine_transcription
 from aisha.skills.reminder import handle_reminder, is_reminder_intent
@@ -37,6 +52,12 @@ from aisha.skills.youtube import (
     get_pending_video,
     store_pending_video,
     strip_youtube_url,
+)
+from aisha.skills.video_download import (
+    cleanup_expired,
+    download_video,
+    extract_video_url,
+    get_download_entry,
 )
 from aisha.skills.webpage import (
     clear_pending_page,
@@ -96,6 +117,15 @@ _DB_URL = (
 )
 
 
+async def _periodic_download_cleanup():
+    """Background task: remove expired temporary video files every 15 minutes."""
+    while True:
+        await asyncio.sleep(15 * 60)
+        removed = cleanup_expired()
+        if removed:
+            log.info(f"Cleaned up {removed} expired download(s)")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global http_client, scheduler
@@ -104,6 +134,8 @@ async def lifespan(app: FastAPI):
         headers={"Authorization": f"Bearer {WHATSAPP_TOKEN}"},
         timeout=60.0,
     )
+
+    cleanup_task = asyncio.create_task(_periodic_download_cleanup())
 
     engine = create_async_engine(
         _DB_URL,
@@ -120,6 +152,7 @@ async def lifespan(app: FastAPI):
         log.info("WhatsApp agent started")
         yield
 
+    cleanup_task.cancel()
     await http_client.aclose()
 
 
@@ -138,6 +171,21 @@ async def verify_webhook(
         return int(hub_challenge) if hub_challenge.isdigit() else hub_challenge
     log.warning("Webhook verification failed: bad token")
     return {"error": "invalid verify token"}, 403
+
+
+@app.get("/download/{token}")
+async def serve_download(token: str):
+    """Serves a temporary video file previously downloaded by the video_download skill."""
+    entry = get_download_entry(token)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Link expirado ou não encontrado.")
+    if not entry.filepath.exists():
+        raise HTTPException(status_code=410, detail="Arquivo não está mais disponível.")
+    return FileResponse(
+        path=entry.filepath,
+        filename=entry.filename,
+        media_type="video/mp4",
+    )
 
 
 @app.post("/webhook")
@@ -217,6 +265,16 @@ async def receive_webhook(request: Request):
     return {"status": "ok"}
 
 
+_DOWNLOAD_KEYWORDS = re.compile(
+    r"\b(baixa|baixar|download|salva|salvar|me manda|manda|pega)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_download_intent(text: str) -> bool:
+    return bool(_DOWNLOAD_KEYWORDS.search(text))
+
+
 def _contains_aisha(text: str) -> bool:
     return bool(re.search(r"\baisha\b", text, re.IGNORECASE))
 
@@ -228,25 +286,47 @@ def _strip_aisha(text: str) -> str:
 async def handle_chat(sender: str, text: str):
     """Routes a text message through Aisha chat (or reminder/youtube skill) and sends the response."""
     try:
-        # 1. Pending image instruction
+        # 1. Pending scanned document — user is selecting pages
+        pending_doc = get_pending_document(sender)
+        if pending_doc:
+            log.info(f"Pending scanned PDF for {sender} — parsing page selection: {text[:60]}")
+            await _process_document_pages(sender, text, pending_doc)
+            return
+
+        # 2. Pending image instruction
         pending_img = get_pending_image(sender)
         if pending_img:
             log.info(f"Pending image found for {sender} — using text as instruction")
             await _process_image_instruction(sender, text, pending_img)
             return
 
-        # 2. Pending YouTube video — user is now sending the instruction
+        # 3. Pending YouTube video — user is now sending the instruction
         pending_yt = get_pending_video(sender)
         if pending_yt:
-            log.info(f"Pending YouTube for {sender} — processing with instruction: {text[:60]}")
+            log.info(f"Pending YouTube for {sender} — instruction: {text[:60]}")
             clear_pending_video(sender)
-            await send_message(sender, "⏳ Analisando vídeo...")
-            await increment_stat(sender, "youtube")
-            reply = await analyze_video(pending_yt.url, text)
-            await send_message(sender, reply)
+            if _is_download_intent(text):
+                await send_message(sender, "⏳ Baixando vídeo...")
+                try:
+                    token, filename = await download_video(pending_yt.url)
+                    link = f"{BASE_URL}/download/{token}"
+                    await send_message(
+                        sender,
+                        f"✅ *{filename}*\n\n"
+                        f"🔗 Link de download (expira em 30 min):\n{link}",
+                    )
+                    await increment_stat(sender, "video_downloads")
+                except Exception as exc:
+                    log.exception("Video download failed")
+                    await send_message(sender, f"Não consegui baixar o vídeo: {exc}")
+            else:
+                await send_message(sender, "⏳ Analisando vídeo...")
+                await increment_stat(sender, "youtube")
+                reply = await analyze_video(pending_yt.url, text)
+                await send_message(sender, reply)
             return
 
-        # 3. Pending webpage — user is now sending the instruction
+        # 4. Pending webpage — user is now sending the instruction
         pending_page = get_pending_page(sender)
         if pending_page:
             log.info(f"Pending webpage for {sender} — processing with instruction: {text[:60]}")
@@ -266,7 +346,26 @@ async def handle_chat(sender: str, text: str):
                 await send_message(sender, f"Não consegui acessar a página: {e}")
             return
 
-        # 4. YouTube URL in current message
+        # 5. Video download URL (YouTube or X/Twitter with "baixa"/"download" intent)
+        video_url = extract_video_url(text)
+        if video_url and _is_download_intent(text):
+            log.info(f"Video download intent for {sender}: {video_url}")
+            await send_message(sender, "⏳ Baixando vídeo...")
+            try:
+                token, filename = await download_video(video_url)
+                link = f"{BASE_URL}/download/{token}"
+                await send_message(
+                    sender,
+                    f"✅ *{filename}*\n\n"
+                    f"🔗 Link de download (expira em 30 min):\n{link}",
+                )
+                await increment_stat(sender, "video_downloads")
+            except Exception as exc:
+                log.exception("Video download failed")
+                await send_message(sender, f"Não consegui baixar o vídeo: {exc}")
+            return
+
+        # 6. YouTube URL in current message
         yt_url = extract_youtube_url(text)
         if yt_url:
             instruction = strip_youtube_url(text)
@@ -287,11 +386,12 @@ async def handle_chat(sender: str, text: str):
                     "• _Faz um resumo_\n"
                     "• _Transcreve o vídeo_\n"
                     "• _Quais são os pontos principais?_\n"
-                    "• _Explica os conceitos mencionados_",
+                    "• _Explica os conceitos mencionados_\n"
+                    "• _Baixa o vídeo_",
                 )
             return
 
-        # 5. Web URL in current message
+        # 7. Web URL in current message
         web_url = extract_web_url(text)
         if web_url:
             instruction = strip_web_url(text)
@@ -325,7 +425,7 @@ async def handle_chat(sender: str, text: str):
                 )
             return
 
-        # 7. Classify intent (LLM) — SELF goes straight to chat, skipping skill routers
+        # 8. Classify intent (LLM) — SELF goes straight to chat, skipping skill routers
         complexity = await classify(text)
         log.info(f"Classified as {complexity}: {text[:80]}")
 
@@ -348,7 +448,7 @@ async def handle_chat(sender: str, text: str):
                 await send_message(sender, reply)
                 return
 
-        # 9. Chat (SELF / SIMPLE / COMPLEX)
+        # 10. Chat (SELF / SIMPLE / COMPLEX)
         if wants_new_session(text):
             await delete_session(sender)
             log.info(f"Session reset requested by {sender}")
@@ -497,8 +597,24 @@ async def handle_document(sender: str, message: dict):
             )
             return
 
-        await send_message(sender, "📄 Processando documento...")
         await increment_stat(sender, "documents")
+
+        # For scanned PDFs over the page limit, ask which pages the user wants
+        if mime_type == "application/pdf":
+            is_scanned, total_pages = await asyncio.to_thread(get_pdf_info, doc_bytes)
+            if is_scanned and total_pages > MAX_SCANNED_PAGES:
+                caption = doc.get("caption", "").strip()
+                store_pending_document(sender, doc_bytes, total_pages, caption or None)
+                await send_message(
+                    sender,
+                    f"📄 Este PDF escaneado tem *{total_pages} páginas*.\n\n"
+                    f"O limite por análise é de *{MAX_SCANNED_PAGES} páginas*.\n\n"
+                    f"Quais páginas você quer analisar?\n"
+                    f"Exemplos: _\"páginas 1 a 5\"_, _\"página 3\"_, _\"páginas 2, 4 e 7\"_",
+                )
+                return
+
+        await send_message(sender, "📄 Processando documento...")
 
         document_text = await extract_text_async(doc_bytes, mime_type)
         log.info(f"Text extracted: {len(document_text)} chars from {filename}")
@@ -524,6 +640,66 @@ async def handle_document(sender: str, message: dict):
     except Exception as e:
         log.exception("Document processing failed")
         await send_message(sender, f"Erro ao processar documento: {e}")
+
+
+def _parse_page_selection(text: str, total_pages: int) -> list[int] | None:
+    """Parse a user's page selection text into a list of 0-based page indices.
+
+    Accepts formats like "página 3", "páginas 1 a 5", "páginas 2, 4 e 7".
+    Returns None if nothing could be parsed.
+    """
+    text_lower = text.lower()
+    indices: set[int] = set()
+
+    # Range: "1 a 5", "de 2 a 8"
+    range_match = re.search(r"(\d+)\s+a\s+(\d+)", text_lower)
+    if range_match:
+        start, end = int(range_match.group(1)), int(range_match.group(2))
+        indices.update(range(start - 1, end))
+
+    # Individual numbers (also catches numbers inside ranges, so deduplicate)
+    for m in re.finditer(r"\d+", text_lower):
+        n = int(m.group())
+        if 1 <= n <= total_pages:
+            indices.add(n - 1)
+
+    if not indices:
+        return None
+
+    valid = sorted(i for i in indices if 0 <= i < total_pages)
+    return valid[:MAX_SCANNED_PAGES]  # enforce limit even on manual selection
+
+
+async def _process_document_pages(sender: str, text: str, pending):
+    """Parse the user's page selection, run vision OCR and send the result."""
+    clear_pending_document(sender)
+
+    page_indices = _parse_page_selection(text, pending.total_pages)
+    if not page_indices:
+        await send_message(
+            sender,
+            "Não entendi quais páginas você quer. "
+            "Me diga assim: _\"páginas 1 a 5\"_, _\"página 3\"_ ou _\"páginas 2, 4 e 7\"_.",
+        )
+        # Restore pending so the user can try again
+        store_pending_document(sender, pending.pdf_bytes, pending.total_pages, pending.caption)
+        return
+
+    page_display = ", ".join(str(i + 1) for i in page_indices)
+    await send_message(sender, f"📄 Processando páginas {page_display}...")
+
+    document_text = await extract_scanned_pages(pending.pdf_bytes, page_indices)
+    if not document_text.strip():
+        await send_message(sender, "Não consegui extrair texto dessas páginas.")
+        return
+
+    prev_id = await get_response_id(sender)
+    result = await chat_with_document(document_text, pending.caption, prev_id)
+
+    if result.response_id:
+        await upsert_session(sender, result.response_id)
+    if result.text:
+        await send_message(sender, result.text)
 
 
 async def _process_image_instruction(sender: str, instruction: str, pending):

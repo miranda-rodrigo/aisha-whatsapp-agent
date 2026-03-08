@@ -27,6 +27,8 @@ MAX_TEXT_CHARS = 100_000  # ~25k tokens — safe for gpt-4.1 128k context
 _SCANNED_CHARS_PER_PAGE_THRESHOLD = 50
 # Resolução de renderização para visão (DPI). 150 é suficiente para OCR de qualidade.
 _PDF_RENDER_DPI = 150
+# Máximo de páginas processadas por chamada de visão
+MAX_SCANNED_PAGES = 5
 
 _SUMMARIZE_PROMPT = """\
 Você é Aisha, uma assistente pessoal. O usuário enviou um documento e quer que você o analise.
@@ -39,42 +41,55 @@ Instruções:
 - Use formatação clara com seções e bullet points quando apropriado."""
 
 
-def _is_scanned_pdf(file_bytes: bytes) -> bool:
-    """Return True if the PDF appears to be scanned (image-only, no native text)."""
+def get_pdf_info(file_bytes: bytes) -> tuple[bool, int]:
+    """Return (is_scanned, total_pages) for a PDF."""
     import pymupdf
 
     doc = pymupdf.open(stream=file_bytes, filetype="pdf")
+    total_pages = len(doc)
     total_chars = sum(len(page.get_text()) for page in doc)
-    total_pages = max(len(doc), 1)
-    chars_per_page = total_chars / total_pages
+    chars_per_page = total_chars / max(total_pages, 1)
     log.info(f"PDF text density: {chars_per_page:.1f} chars/page ({total_pages} pages)")
-    return chars_per_page < _SCANNED_CHARS_PER_PAGE_THRESHOLD
+    return chars_per_page < _SCANNED_CHARS_PER_PAGE_THRESHOLD, total_pages
 
 
-def _pdf_pages_to_base64_images(file_bytes: bytes) -> list[str]:
-    """Render each PDF page as a PNG image and return a list of base64-encoded strings."""
+def _pdf_pages_to_base64_images(
+    file_bytes: bytes, page_indices: list[int]
+) -> list[str]:
+    """Render the given PDF pages (0-based indices) as PNG images in base64."""
     import pymupdf
 
     doc = pymupdf.open(stream=file_bytes, filetype="pdf")
     zoom = _PDF_RENDER_DPI / 72  # pymupdf default is 72 DPI
     matrix = pymupdf.Matrix(zoom, zoom)
     images = []
-    for page in doc:
-        pix = page.get_pixmap(matrix=matrix)
+    for idx in page_indices:
+        pix = doc[idx].get_pixmap(matrix=matrix)
         png_bytes = pix.tobytes("png")
         images.append(base64.b64encode(png_bytes).decode("utf-8"))
-    log.info(f"Rendered {len(images)} PDF page(s) to images at {_PDF_RENDER_DPI} DPI")
+    log.info(f"Rendered {len(images)} PDF page(s) at {_PDF_RENDER_DPI} DPI")
     return images
 
 
-async def _extract_pdf_text_vision(file_bytes: bytes) -> str:
-    """Extract text from a scanned PDF by sending each page as an image to gpt-4.1 vision."""
-    page_images = await asyncio.to_thread(_pdf_pages_to_base64_images, file_bytes)
+async def extract_scanned_pages(
+    file_bytes: bytes, page_indices: list[int]
+) -> str:
+    """OCR specific pages of a scanned PDF via gpt-4.1 vision (0-based indices)."""
+    page_images = await asyncio.to_thread(
+        _pdf_pages_to_base64_images, file_bytes, page_indices
+    )
 
     content: list[dict] = [
-        {"type": "input_text", "text": "Extraia todo o texto deste documento página por página, preservando a estrutura original (títulos, parágrafos, tabelas, listas). Não faça resumos — transcreva o conteúdo completo."},
+        {
+            "type": "input_text",
+            "text": (
+                "Extraia todo o texto deste documento página por página, "
+                "preservando a estrutura original (títulos, parágrafos, tabelas, listas). "
+                "Não faça resumos — transcreva o conteúdo completo."
+            ),
+        },
     ]
-    for i, b64 in enumerate(page_images):
+    for i, b64 in zip(page_indices, page_images):
         content.append({"type": "input_text", "text": f"--- Página {i + 1} ---"})
         content.append({"type": "input_image", "image_url": f"data:image/png;base64,{b64}"})
 
@@ -110,12 +125,14 @@ def _extract_pdf_text_native(file_bytes: bytes) -> str:
 
 
 async def _extract_pdf_text(file_bytes: bytes) -> str:
-    """Extract PDF text, using vision OCR as fallback for scanned documents."""
-    if await asyncio.to_thread(_is_scanned_pdf, file_bytes):
-        log.info("PDF detected as scanned — using vision OCR")
-        return await _extract_pdf_text_vision(file_bytes)
-    log.info("PDF detected as native — using pymupdf4llm")
-    return await asyncio.to_thread(_extract_pdf_text_native, file_bytes)
+    """Extract PDF text. For scanned PDFs within page limit, uses vision OCR."""
+    is_scanned, total_pages = await asyncio.to_thread(get_pdf_info, file_bytes)
+    if not is_scanned:
+        log.info("PDF detected as native — using pymupdf4llm")
+        return await asyncio.to_thread(_extract_pdf_text_native, file_bytes)
+    log.info(f"PDF detected as scanned ({total_pages} pages) — using vision OCR")
+    page_indices = list(range(min(total_pages, MAX_SCANNED_PAGES)))
+    return await extract_scanned_pages(file_bytes, page_indices)
 
 
 def _extract_docx_text(file_bytes: bytes) -> str:
