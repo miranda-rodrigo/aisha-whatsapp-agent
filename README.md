@@ -42,6 +42,12 @@ Aisha é uma assistente pessoal inteligente que roda no WhatsApp Business API. E
 - Após receber o resultado, você pode pedir mais modificações na mesma conversa (edição iterativa via `previous_response_id`)
 - Imagem pendente expira após 5 minutos sem instrução
 
+### Análise de Vídeos do YouTube (Gemini 2.5 Flash)
+- Envie qualquer link do YouTube e a Aisha analisa o vídeo diretamente
+- Pode enviar o link com instrução na mesma mensagem, ou só o link e a Aisha pergunta o que fazer
+- Funciona com vídeos públicos de qualquer duração
+- Exemplos de uso: resumo, transcrição, pontos principais, post para LinkedIn, perguntas sobre o conteúdo
+
 ### Lembretes
 - Criação via linguagem natural em português
 - Aviso enviado por WhatsApp X minutos antes do evento (padrão: 15 min)
@@ -89,6 +95,8 @@ Processa imagem
 
 Chat
         │
+        ├── link YouTube ──► youtube.py ──► Gemini 2.5 Flash ──► análise
+        │
         ├── menciona lembrete ──► reminder.py
         │                              ├── criar ──► Supabase + APScheduler + link GCal
         │                              ├── listar ──► lista do Supabase
@@ -125,6 +133,7 @@ whatsapp-agent/
 ├── image_state.py      # Estado em memória para imagens pendentes de instrução (TTL 5min)
 ├── reminder.py         # Skill de lembretes: parsing LLM, agendamento, Google Calendar
 ├── reminder_store.py   # CRUD Supabase para tabela reminders
+├── youtube.py          # Skill de vídeos YouTube via Gemini 2.5 Flash
 ├── session.py          # Gerenciamento de sessões no Supabase (TTL 10min)
 ├── transcribe.py       # Transcrição de áudio via Whisper API + ffmpeg
 ├── refine.py           # Refinamento de transcrições via GPT-4o-mini
@@ -152,6 +161,7 @@ whatsapp-agent/
 | Sessões | Supabase (PostgreSQL) |
 | Lembretes (agendamento) | APScheduler 4.x async + SQLAlchemy |
 | Lembretes (parsing de datas) | dateparser (pt-BR nativo) |
+| Análise de vídeos YouTube | Google Gemini 2.5 Flash |
 | HTTP client | httpx (async) |
 | Hosting | Railway (Docker) |
 
@@ -213,6 +223,7 @@ SUPABASE_URL=https://xxxxx.supabase.co
 SUPABASE_KEY=sb_publishable_... ou sb_secret_...
 USER_TIMEZONE=America/Sao_Paulo
 REMINDER_LEAD_MINUTES=15
+GEMINI_API_KEY=AIzaSy...
 ```
 
 | Variável | Descrição |
@@ -226,6 +237,7 @@ REMINDER_LEAD_MINUTES=15
 | `SUPABASE_KEY` | Publishable ou Secret key do Supabase |
 | `USER_TIMEZONE` | Timezone do usuário para lembretes (padrão: `America/Sao_Paulo`) |
 | `REMINDER_LEAD_MINUTES` | Minutos de antecedência para o aviso do lembrete (padrão: `15`) |
+| `GEMINI_API_KEY` | API key do Google AI Studio para análise de vídeos YouTube (opcional) |
 | `PORT` | Porta do servidor (Railway injeta automaticamente; padrão: 8000) |
 
 ### 4. Rodar localmente

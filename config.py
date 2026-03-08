@@ -22,6 +22,8 @@ OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+
 ALLOWED_NUMBERS = set(os.environ.get("ALLOWED_NUMBERS", "").split(","))
 
 GRAPH_API_URL = f"https://graph.facebook.com/v22.0/{WHATSAPP_PHONE_ID}"

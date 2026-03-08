@@ -4,6 +4,7 @@ httpx
 openai
 python-dotenv
 apscheduler[sqlalchemy]==4.0.0a6
+google-genai>=1.0
 dateparser>=1.2
 sqlalchemy[asyncio]>=2.0
 asyncpg>=0.29

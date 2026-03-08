@@ -216,6 +216,41 @@ Para cancelar: 'cancela o lembrete 1'
 
 ---
 
+## 7. Análise de Vídeos do YouTube
+
+A Aisha analisa qualquer vídeo público do YouTube usando o Gemini 2.5 Flash. Basta enviar o link.
+
+### Enviar link com instrução (processa imediatamente)
+
+```
+https://youtu.be/dQw4w9WgXcQ faz um resumo
+https://www.youtube.com/watch?v=abc123 transcreve esse vídeo
+https://youtu.be/xyz quais são os pontos principais?
+```
+
+### Enviar só o link (Aisha pergunta o que fazer)
+
+```
+Você: https://youtu.be/dQw4w9WgXcQ
+Aisha: 🎬 Link do YouTube detectado! O que você quer que eu faça com esse vídeo?
+
+Você: resume em tópicos
+Aisha: [análise completa do vídeo]
+```
+
+**Exemplos de instruções:**
+```
+"resume"
+"transcreve"
+"quais os pontos principais?"
+"explica os conceitos técnicos mencionados"
+"faz um post para o LinkedIn baseado nesse vídeo"
+"isso é adequado para crianças?"
+"quais os timestamps mais importantes?"
+```
+
+---
+
 ## 8. Roteamento Automático de Modelo
 
 A Aisha escolhe automaticamente o melhor modelo para cada mensagem — você não precisa fazer nada:
@@ -229,6 +264,7 @@ A Aisha escolhe automaticamente o melhor modelo para cada mensagem — você nã
 | Transcrição de áudio | `whisper-1` |
 | Refinamento de transcrição | `gpt-4o-mini` |
 | Extração de intenção de lembrete | `gpt-4o-mini` |
+| Análise de vídeo YouTube | `gemini-2.5-flash` |
 
 ---
 
