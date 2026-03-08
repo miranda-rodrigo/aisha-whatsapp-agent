@@ -86,7 +86,55 @@ A imagem chega como foto no próprio WhatsApp, sem precisar abrir link.
 
 ---
 
-## 6. Lembretes
+## 6. Edição de Imagem
+
+Envie uma foto para a Aisha e ela pergunta o que você quer fazer. Responda com texto ou áudio — não precisa dizer "Aisha", porque ela já sabe que é sobre a imagem.
+
+**Como usar:**
+```
+[Você envia uma foto]
+Aisha: 📷 O que você quer que eu faça com esta imagem?
+
+Você: melhore a qualidade e aumente o brilho
+Aisha: ⏳ Processando imagem...
+[Aisha envia a imagem melhorada]
+
+Você: agora coloque um filtro vintage
+[Aisha envia a imagem com filtro — edição iterativa]
+```
+
+**Também funciona por áudio:**
+```
+[Você envia uma foto]
+Aisha: 📷 O que você quer que eu faça com esta imagem?
+
+[áudio] "remove o fundo dessa imagem"
+Aisha: ⏳ Processando imagem...
+[Aisha envia a imagem sem fundo]
+```
+
+**Atalho com legenda:** Se você enviar a foto já com uma legenda no WhatsApp, a legenda é usada como instrução diretamente — a Aisha não pergunta o que fazer.
+
+**Possibilidades:**
+- Melhorar qualidade (brilho, contraste, nitidez)
+- Mudar estilo (aquarela, desenho, vintage, etc.)
+- Remover ou trocar fundo
+- Gerar uma nova imagem baseada na original
+- Descrever o conteúdo da imagem
+- Extrair texto da imagem
+- Editar elementos específicos
+
+**Edição iterativa:**
+- Após receber a imagem editada, você pode pedir mais modificações na mesma conversa
+- A Aisha mantém o contexto e sabe qual imagem está sendo editada
+
+**Observações:**
+- A imagem pendente expira após **5 minutos** sem instrução
+- Limite de tamanho: 50 MB por imagem
+
+---
+
+## 7. Lembretes
 
 A Aisha agenda lembretes e avisa você com antecedência (padrão: 15 minutos antes). Também envia um link para adicionar o evento ao Google Calendar.
 
@@ -168,7 +216,7 @@ Para cancelar: 'cancela o lembrete 1'
 
 ---
 
-## 7. Roteamento Automático de Modelo
+## 8. Roteamento Automático de Modelo
 
 A Aisha escolhe automaticamente o melhor modelo para cada mensagem — você não precisa fazer nada:
 
@@ -176,7 +224,8 @@ A Aisha escolhe automaticamente o melhor modelo para cada mensagem — você nã
 |---|---|
 | Saudações, perguntas simples, bate-papo | `gpt-4.1` — rápido e barato |
 | Pesquisa, raciocínio, tarefas técnicas | `gpt-5.4` — mais capaz |
-| Geração de imagem | `gpt-image-1.5` |
+| Geração de imagem | `gpt-image-1.5` (via `gpt-5.4`) |
+| Edição de imagem (foto do usuário) | `gpt-image-1.5` (via `gpt-5.4` + input multimodal) |
 | Transcrição de áudio | `whisper-1` |
 | Refinamento de transcrição | `gpt-4o-mini` |
 | Extração de intenção de lembrete | `gpt-4o-mini` |

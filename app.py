@@ -8,7 +8,7 @@ from apscheduler.datastores.sqlalchemy import SQLAlchemyDataStore
 from fastapi import FastAPI, Query, Request
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from chat import chat, wants_new_session
+from chat import chat, chat_with_image, wants_new_session
 from config import (
     ALLOWED_NUMBERS,
     GRAPH_API_URL,
@@ -17,10 +17,19 @@ from config import (
     WEBHOOK_VERIFY_TOKEN,
     WHATSAPP_TOKEN,
 )
+from image_state import clear_pending_image, get_pending_image, store_pending_image
 from refine import refine_transcription
 from reminder import handle_reminder, is_reminder_intent
 from session import delete_session, get_response_id, upsert_session
 from transcribe import transcribe_audio_bytes
+from youtube import (
+    analyze_video,
+    clear_pending_video,
+    extract_youtube_url,
+    get_pending_video,
+    store_pending_video,
+    strip_youtube_url,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -120,6 +129,8 @@ async def receive_webhook(request: Request):
     elif msg_type == "text":
         text = message.get("text", {}).get("body", "")
         await handle_chat(sender, text)
+    elif msg_type == "image":
+        await handle_image(sender, message)
     else:
         await send_message(sender, f"Tipo '{msg_type}' ainda não suportado.")
 
@@ -135,14 +146,58 @@ def _strip_aisha(text: str) -> str:
 
 
 async def handle_chat(sender: str, text: str):
-    """Routes a text message through Aisha chat (or reminder skill) and sends the response."""
+    """Routes a text message through Aisha chat (or reminder/youtube skill) and sends the response."""
     try:
+        # 1. Pending image instruction
+        pending_img = get_pending_image(sender)
+        if pending_img:
+            log.info(f"Pending image found for {sender} — using text as instruction")
+            await _process_image_instruction(sender, text, pending_img)
+            return
+
+        # 2. Pending YouTube video — user is now sending the instruction
+        pending_yt = get_pending_video(sender)
+        if pending_yt:
+            log.info(f"Pending YouTube for {sender} — processing with instruction: {text[:60]}")
+            clear_pending_video(sender)
+            await send_message(sender, "⏳ Analisando vídeo...")
+            reply = await analyze_video(pending_yt.url, text)
+            await send_message(sender, reply)
+            return
+
+        # 3. YouTube URL in current message
+        yt_url = extract_youtube_url(text)
+        if yt_url:
+            instruction = strip_youtube_url(text)
+            if instruction:
+                # Instruction given alongside the URL — process immediately
+                log.info(f"YouTube URL + instruction for {sender}: {yt_url}")
+                await send_message(sender, "⏳ Analisando vídeo...")
+                reply = await analyze_video(yt_url, instruction)
+                await send_message(sender, reply)
+            else:
+                # No instruction — store and ask what to do
+                store_pending_video(sender, yt_url)
+                log.info(f"YouTube URL stored for {sender}: {yt_url}")
+                await send_message(
+                    sender,
+                    "🎬 Link do YouTube detectado! O que você quer que eu faça com esse vídeo?\n\n"
+                    "Exemplos:\n"
+                    "• _Faz um resumo_\n"
+                    "• _Transcreve o vídeo_\n"
+                    "• _Quais são os pontos principais?_\n"
+                    "• _Explica os conceitos mencionados_",
+                )
+            return
+
+        # 4. Reminder intent
         if is_reminder_intent(text):
             log.info(f"Reminder intent detected for {sender}")
             reply = await handle_reminder(sender, text, scheduler)
             await send_message(sender, reply)
             return
 
+        # 5. Normal chat
         if wants_new_session(text):
             await delete_session(sender)
             log.info(f"Session reset requested by {sender}")
@@ -183,6 +238,12 @@ async def handle_audio(sender: str, message: dict):
         raw_text = await transcribe_audio_bytes(audio_bytes, mime_type)
         log.info(f"Raw transcription: {len(raw_text)} chars")
 
+        pending = get_pending_image(sender)
+        if pending:
+            log.info(f"Pending image found for {sender} — using audio as instruction")
+            await _process_image_instruction(sender, raw_text, pending)
+            return
+
         if _contains_aisha(raw_text):
             log.info("Keyword 'Aisha' detected — routing to chat")
             user_input = _strip_aisha(raw_text)
@@ -200,6 +261,71 @@ async def handle_audio(sender: str, message: dict):
     except Exception as e:
         log.exception("Audio processing failed")
         await send_message(sender, f"Erro ao processar áudio: {e}")
+
+
+async def handle_image(sender: str, message: dict):
+    """Downloads an image from WhatsApp and stores it awaiting user instructions."""
+    image_id = message["image"]["id"]
+    mime_type = message["image"].get("mime_type", "image/jpeg")
+    log.info(f"Downloading image {image_id}")
+
+    try:
+        media_resp = await http_client.get(
+            f"https://graph.facebook.com/v22.0/{image_id}"
+        )
+        media_resp.raise_for_status()
+        media_url = media_resp.json()["url"]
+
+        image_resp = await http_client.get(media_url)
+        image_resp.raise_for_status()
+        image_bytes = image_resp.content
+
+        log.info(f"Image downloaded: {len(image_bytes)} bytes, mime={mime_type}")
+
+        max_size = 50 * 1024 * 1024  # 50 MB (GPT-image-1.5 limit)
+        if len(image_bytes) > max_size:
+            await send_message(
+                sender,
+                "A imagem é muito grande (máx. 50 MB). Envie uma imagem menor.",
+            )
+            return
+
+        store_pending_image(sender, image_bytes, mime_type)
+
+        caption = message["image"].get("caption", "").strip()
+        if caption:
+            log.info(f"Image has caption — using as instruction: {caption[:80]}")
+            pending = get_pending_image(sender)
+            if pending:
+                await _process_image_instruction(sender, caption, pending)
+            return
+
+        await send_message(sender, "📷 O que você quer que eu faça com esta imagem?")
+    except Exception as e:
+        log.exception("Image handling failed")
+        await send_message(sender, f"Erro ao processar imagem: {e}")
+
+
+async def _process_image_instruction(sender: str, instruction: str, pending):
+    """Sends the pending image + instruction to the AI and delivers the result."""
+    clear_pending_image(sender)
+    await send_message(sender, "⏳ Processando imagem...")
+
+    prev_id = await get_response_id(sender)
+    result = await chat_with_image(
+        instruction,
+        pending.image_bytes,
+        pending.mime_type,
+        previous_response_id=prev_id,
+    )
+
+    if result.response_id:
+        await upsert_session(sender, result.response_id)
+
+    if result.image_bytes:
+        await send_image(sender, result.image_bytes)
+    if result.text:
+        await send_message(sender, result.text)
 
 
 async def send_message(to: str, text: str):

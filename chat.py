@@ -4,6 +4,7 @@ Routing strategy:
   - gpt-4.1-mini  → classify complexity (cheap, fast)
   - gpt-4.1       → simple/casual messages (greetings, direct questions)
   - gpt-5.4       → complex messages (reasoning, web search, image generation)
+  - gpt-5.4 + image_generation → image editing/generation from user photos
 """
 
 import base64
@@ -42,6 +43,12 @@ _NEW_SESSION_PATTERNS = [
     r"\breset\b",
     r"\bvamos falar sobre outra coisa\b",
 ]
+
+_IMAGE_INSTRUCTIONS = """\
+O usuário enviou uma imagem e está dando instruções sobre o que fazer com ela. \
+Execute a instrução do usuário sobre a imagem. Isso pode incluir: melhorar a imagem, \
+editar elementos, mudar estilo, gerar uma nova imagem baseada nesta, descrever a imagem, \
+extrair texto, remover fundo, etc. Use a ferramenta de geração de imagem quando apropriado."""
 
 _client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
@@ -158,6 +165,62 @@ async def _chat_complex(
     )
     log.info(
         f"Complex result: text={bool(result.text)}, "
+        f"image={bool(result.image_bytes)}, id={result.response_id}"
+    )
+    return result
+
+
+async def chat_with_image(
+    user_input: str,
+    image_bytes: bytes,
+    mime_type: str,
+    previous_response_id: str | None = None,
+) -> ChatResult:
+    """Process user instruction together with an image via Responses API."""
+    b64_data = base64.b64encode(image_bytes).decode()
+
+    multimodal_input = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_image",
+                    "image_url": f"data:{mime_type};base64,{b64_data}",
+                },
+                {"type": "input_text", "text": user_input},
+            ],
+        }
+    ]
+
+    kwargs: dict = {
+        "model": "gpt-5.4",
+        "instructions": f"{SYSTEM_PROMPT}\n\n{_IMAGE_INSTRUCTIONS}",
+        "input": multimodal_input,
+        "tools": [{"type": "image_generation"}],
+    }
+    if previous_response_id:
+        kwargs["previous_response_id"] = previous_response_id
+
+    response = await _client.responses.create(**kwargs)
+
+    text_parts: list[str] = []
+    result_image: bytes | None = None
+
+    for item in response.output:
+        if item.type == "message":
+            for content in item.content:
+                if content.type == "output_text":
+                    text_parts.append(content.text)
+        elif item.type == "image_generation_call":
+            result_image = base64.b64decode(item.result)
+
+    result = ChatResult(
+        text="\n".join(text_parts) if text_parts else None,
+        image_bytes=result_image,
+        response_id=response.id,
+    )
+    log.info(
+        f"Image chat result: text={bool(result.text)}, "
         f"image={bool(result.image_bytes)}, id={result.response_id}"
     )
     return result

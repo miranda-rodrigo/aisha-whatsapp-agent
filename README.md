@@ -33,6 +33,15 @@ Aisha é uma assistente pessoal inteligente que roda no WhatsApp Business API. E
 - Exemplo: "Aisha, gera uma imagem de um pôr do sol na praia"
 - A imagem é enviada diretamente no WhatsApp
 
+### Edição de Imagem
+- Envie uma foto e a Aisha pergunta o que você quer fazer com ela
+- Responda com texto ou áudio (não precisa dizer "Aisha" — ela já sabe que é sobre a imagem)
+- Possibilidades: melhorar qualidade, mudar estilo, remover fundo, gerar variação, descrever, extrair texto, etc.
+- A imagem é processada via Responses API com input multimodal (imagem + instrução) usando gpt-image-1.5
+- Se a imagem for enviada com legenda, a legenda é usada como instrução diretamente
+- Após receber o resultado, você pode pedir mais modificações na mesma conversa (edição iterativa via `previous_response_id`)
+- Imagem pendente expira após 5 minutos sem instrução
+
 ### Lembretes
 - Criação via linguagem natural em português
 - Aviso enviado por WhatsApp X minutos antes do evento (padrão: 15 min)
@@ -60,14 +69,23 @@ Aisha é uma assistente pessoal inteligente que roda no WhatsApp Business API. E
 ```
 Mensagem WhatsApp
         │
-        ├── Texto ──────────────────────────────► Chat
+        ├── Texto ──┬── imagem pendente? ──► Processa imagem com instrução
+        │           └── sem imagem ────────► Chat
         │
-        └── Áudio ──► Whisper (transcrição)
-                              │
-                              ├── contém "Aisha" ──► Chat
-                              │
-                              └── sem "Aisha" ────► Refinamento (GPT-4o-mini)
-                                                     └── devolve transcrição
+        ├── Áudio ──► Whisper (transcrição)
+        │                     │
+        │                     ├── imagem pendente? ──► Processa imagem com instrução
+        │                     ├── contém "Aisha" ───► Chat
+        │                     └── sem "Aisha" ──────► Refinamento (GPT-4o-mini)
+        │                                              └── devolve transcrição
+        │
+        └── Imagem ──┬── com legenda ──► Processa imagem com legenda como instrução
+                     └── sem legenda ──► Armazena imagem + pergunta o que fazer
+
+Processa imagem
+        └── gpt-5.4 + image_generation (input multimodal: imagem + texto)
+                └── envia resultado no WhatsApp
+                      └── follow-ups via previous_response_id (edição iterativa)
 
 Chat
         │
@@ -103,7 +121,8 @@ A Aisha mantém contexto de conversa usando a Responses API da OpenAI com `previ
 ```
 whatsapp-agent/
 ├── app.py              # FastAPI: webhook, roteamento, APScheduler lifespan
-├── chat.py             # Skill de conversa: classificador + gpt-4.1 + gpt-5.4
+├── chat.py             # Skill de conversa: classificador + gpt-4.1 + gpt-5.4 + edição de imagem
+├── image_state.py      # Estado em memória para imagens pendentes de instrução (TTL 5min)
 ├── reminder.py         # Skill de lembretes: parsing LLM, agendamento, Google Calendar
 ├── reminder_store.py   # CRUD Supabase para tabela reminders
 ├── session.py          # Gerenciamento de sessões no Supabase (TTL 10min)
@@ -127,7 +146,7 @@ whatsapp-agent/
 | LLM chat complexo | OpenAI gpt-5.4 via Responses API |
 | LLM refinamento | OpenAI gpt-4o-mini |
 | Transcrição | OpenAI Whisper (whisper-1) |
-| Geração de imagem | gpt-image-1.5 |
+| Geração/edição de imagem | gpt-image-1.5 (via Responses API image_generation) |
 | Busca na web | Ferramenta nativa da Responses API |
 | Conversão de áudio | ffmpeg |
 | Sessões | Supabase (PostgreSQL) |
