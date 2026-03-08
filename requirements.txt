@@ -3,7 +3,7 @@ uvicorn[standard]
 httpx
 openai
 python-dotenv
-apscheduler>=4.0
+apscheduler[sqlalchemy]==4.0.0a6
 dateparser>=1.2
 sqlalchemy[asyncio]>=2.0
 asyncpg>=0.29
