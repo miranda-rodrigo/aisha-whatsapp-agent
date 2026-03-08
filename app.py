@@ -1,9 +1,11 @@
 import logging
+import re
 from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, Query, Request
 
+from chat import chat
 from config import (
     ALLOWED_NUMBERS,
     GRAPH_API_URL,
@@ -90,15 +92,36 @@ async def receive_webhook(request: Request):
         await handle_audio(sender, message)
     elif msg_type == "text":
         text = message.get("text", {}).get("body", "")
-        await send_message(sender, f"Recebi sua mensagem: {text}")
+        await handle_chat(sender, text)
     else:
         await send_message(sender, f"Tipo '{msg_type}' ainda não suportado.")
 
     return {"status": "ok"}
 
 
+def _contains_aisha(text: str) -> bool:
+    return bool(re.search(r"\baisha\b", text, re.IGNORECASE))
+
+
+def _strip_aisha(text: str) -> str:
+    return re.sub(r"\baisha\b[,\s]*", "", text, count=1, flags=re.IGNORECASE).strip()
+
+
+async def handle_chat(sender: str, text: str):
+    """Routes a text message through Aisha chat and sends the response."""
+    try:
+        result = await chat(text)
+        if result.image_bytes:
+            await send_image(sender, result.image_bytes)
+        if result.text:
+            await send_message(sender, result.text)
+    except Exception as e:
+        log.exception("Chat failed")
+        await send_message(sender, f"Erro no chat: {e}")
+
+
 async def handle_audio(sender: str, message: dict):
-    """Downloads audio from Meta, transcribes it, and sends back the text."""
+    """Downloads audio, transcribes it, and routes to chat or transcription."""
     audio_id = message["audio"]["id"]
     log.info(f"Downloading audio {audio_id}")
 
@@ -112,18 +135,29 @@ async def handle_audio(sender: str, message: dict):
     mime_type = message["audio"].get("mime_type", "audio/ogg")
 
     log.info(f"Audio downloaded: {len(audio_bytes)} bytes, mime={mime_type}")
-    await send_message(sender, "⏳ Transcrevendo...")
+    await send_message(sender, "⏳ Processando áudio...")
 
     try:
         raw_text = await transcribe_audio_bytes(audio_bytes, mime_type)
         log.info(f"Raw transcription: {len(raw_text)} chars")
-        refined_text = await refine_transcription(raw_text)
-        log.info(f"Refined transcription: {len(refined_text)} chars")
-        await send_message(sender, "📝 Transcrição:")
-        await send_message(sender, refined_text)
+
+        if _contains_aisha(raw_text):
+            log.info("Keyword 'Aisha' detected — routing to chat")
+            user_input = _strip_aisha(raw_text)
+            result = await chat(user_input)
+            if result.image_bytes:
+                await send_image(sender, result.image_bytes)
+            if result.text:
+                await send_message(sender, result.text)
+        else:
+            log.info("No keyword — routing to transcription refinement")
+            refined_text = await refine_transcription(raw_text)
+            log.info(f"Refined transcription: {len(refined_text)} chars")
+            await send_message(sender, "📝 Transcrição:")
+            await send_message(sender, refined_text)
     except Exception as e:
-        log.exception("Transcription failed")
-        await send_message(sender, f"Erro na transcrição: {e}")
+        log.exception("Audio processing failed")
+        await send_message(sender, f"Erro ao processar áudio: {e}")
 
 
 async def send_message(to: str, text: str):
@@ -140,3 +174,29 @@ async def send_message(to: str, text: str):
     log.info(f"Message sent to {to}: status={resp.status_code}")
     if resp.status_code != 200:
         log.error(f"Send failed: {resp.text}")
+
+
+async def send_image(to: str, image_bytes: bytes, caption: str = ""):
+    """Uploads an image to Meta and sends it via WhatsApp Cloud API."""
+    upload_resp = await http_client.post(
+        f"{GRAPH_API_URL}/media",
+        data={"messaging_product": "whatsapp", "type": "image/png"},
+        files={"file": ("image.png", image_bytes, "image/png")},
+    )
+    upload_resp.raise_for_status()
+    media_id = upload_resp.json()["id"]
+    log.info(f"Image uploaded: media_id={media_id}")
+
+    payload: dict = {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "image",
+        "image": {"id": media_id},
+    }
+    if caption:
+        payload["image"]["caption"] = caption
+
+    resp = await http_client.post(f"{GRAPH_API_URL}/messages", json=payload)
+    log.info(f"Image sent to {to}: status={resp.status_code}")
+    if resp.status_code != 200:
+        log.error(f"Image send failed: {resp.text}")
