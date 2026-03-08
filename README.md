@@ -160,8 +160,7 @@ whatsapp-agent/
 │       ├── refine.py           # Refinamento de transcrições via GPT-4o-mini
 │       ├── youtube.py          # Análise de vídeos YouTube via Gemini 2.5 Flash
 │       └── image_state.py      # Estado em memória para imagens pendentes (TTL 5min)
-├── docs/
-│   └── skills.md               # Documentação das habilidades da Aisha
+├── skills.md                   # Documentação das habilidades da Aisha
 ├── Dockerfile                  # Python 3.12 + ffmpeg
 ├── .dockerignore
 ├── .gitignore
@@ -363,3 +362,5 @@ No painel de developers.facebook.com:
 - **Porta dinâmica:** O Dockerfile usa `${PORT:-8000}` para compatibilidade com Railway, que injeta a porta via variável de ambiente.
 - **Números brasileiros:** A Meta normaliza números BR removendo um dígito 9. Configure `ALLOWED_NUMBERS` com o formato que a Meta envia.
 - **Timezone:** O servidor roda em UTC (Railway). Lembretes usam `USER_TIMEZONE` para calcular horários relativos corretamente.
+- **PgBouncer:** O Supabase usa PgBouncer em modo transaction, que não suporta prepared statements. O engine é criado com `statement_cache_size=0` para evitar `DuplicatePreparedStatementError` na inicialização do APScheduler.
+- **Logs:** Se a pasta `logs/` existir na raiz do projeto, o app escreve em `logs/aisha.log` com rotação automática (5 MB × 3 arquivos). Caso contrário, só imprime no stdout.
