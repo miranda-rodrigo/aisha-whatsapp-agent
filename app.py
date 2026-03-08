@@ -11,9 +11,9 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from chat import chat, chat_with_image, wants_new_session
 from config import (
     ALLOWED_NUMBERS,
+    DATABASE_PASSWORD,
     GRAPH_API_URL,
     SUPABASE_URL,
-    SUPABASE_KEY,
     WEBHOOK_VERIFY_TOKEN,
     WHATSAPP_TOKEN,
 )
@@ -43,14 +43,10 @@ scheduler: AsyncScheduler
 processed_messages: set[str] = set()
 MAX_PROCESSED_CACHE = 1000
 
-# Build Postgres connection URL from Supabase URL
-# Supabase URL: https://xxxxx.supabase.co
-# Postgres URL: postgresql+asyncpg://postgres.xxxxx:KEY@aws-0-sa-east-1.pooler.supabase.com:5432/postgres
-# We use the Transaction pooler via the REST URL host.
 _project_ref = SUPABASE_URL.replace("https://", "").split(".")[0]
 _DB_URL = (
-    f"postgresql+asyncpg://postgres.{_project_ref}:{SUPABASE_KEY}"
-    f"@aws-0-sa-east-1.pooler.supabase.com:6543/postgres"
+    f"postgresql+asyncpg://postgres.{_project_ref}:{DATABASE_PASSWORD}"
+    f"@aws-0-us-west-2.pooler.supabase.com:6543/postgres"
 )
 
 

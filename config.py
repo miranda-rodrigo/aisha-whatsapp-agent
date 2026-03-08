@@ -23,6 +23,7 @@ SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+DATABASE_PASSWORD = os.environ.get("DATABASE_PASSWORD", "")
 
 ALLOWED_NUMBERS = set(os.environ.get("ALLOWED_NUMBERS", "").split(","))
 
