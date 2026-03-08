@@ -8,7 +8,7 @@ from apscheduler.datastores.sqlalchemy import SQLAlchemyDataStore
 from fastapi import FastAPI, Query, Request
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from chat import chat, chat_with_image, wants_new_session
+from chat import chat, chat_with_document, chat_with_image, wants_new_session
 from config import (
     ALLOWED_NUMBERS,
     DATABASE_PASSWORD,
@@ -17,12 +17,13 @@ from config import (
     WEBHOOK_VERIFY_TOKEN,
     WHATSAPP_TOKEN,
 )
-from document import extract_text_async, is_supported_document, summarize_document, MAX_DOCUMENT_SIZE
+from document import extract_text_async, is_supported_document, MAX_DOCUMENT_SIZE
 from image_state import clear_pending_image, get_pending_image, store_pending_image
 from refine import refine_transcription
 from reminder import handle_reminder, is_reminder_intent
 from session import delete_session, get_response_id, upsert_session
 from transcribe import transcribe_audio_bytes
+from user_profile import increment_stat
 from youtube import (
     analyze_video,
     clear_pending_video,
@@ -160,6 +161,7 @@ async def handle_chat(sender: str, text: str):
             log.info(f"Pending YouTube for {sender} — processing with instruction: {text[:60]}")
             clear_pending_video(sender)
             await send_message(sender, "⏳ Analisando vídeo...")
+            await increment_stat(sender, "youtube")
             reply = await analyze_video(pending_yt.url, text)
             await send_message(sender, reply)
             return
@@ -169,9 +171,9 @@ async def handle_chat(sender: str, text: str):
         if yt_url:
             instruction = strip_youtube_url(text)
             if instruction:
-                # Instruction given alongside the URL — process immediately
                 log.info(f"YouTube URL + instruction for {sender}: {yt_url}")
                 await send_message(sender, "⏳ Analisando vídeo...")
+                await increment_stat(sender, "youtube")
                 reply = await analyze_video(yt_url, instruction)
                 await send_message(sender, reply)
             else:
@@ -193,6 +195,8 @@ async def handle_chat(sender: str, text: str):
         if is_reminder_intent(text):
             log.info(f"Reminder intent detected for {sender}")
             reply = await handle_reminder(sender, text, scheduler)
+            if "✅ Lembrete criado" in reply:
+                await increment_stat(sender, "reminders_created")
             await send_message(sender, reply)
             return
 
@@ -202,7 +206,7 @@ async def handle_chat(sender: str, text: str):
             log.info(f"Session reset requested by {sender}")
 
         prev_id = await get_response_id(sender)
-        result = await chat(text, previous_response_id=prev_id)
+        result = await chat(text, previous_response_id=prev_id, phone=sender)
 
         if result.response_id:
             await upsert_session(sender, result.response_id)
@@ -232,6 +236,7 @@ async def handle_audio(sender: str, message: dict):
 
     log.info(f"Audio downloaded: {len(audio_bytes)} bytes, mime={mime_type}")
     await send_message(sender, "⏳ Processando áudio...")
+    await increment_stat(sender, "audios")
 
     try:
         raw_text = await transcribe_audio_bytes(audio_bytes, mime_type)
@@ -246,7 +251,7 @@ async def handle_audio(sender: str, message: dict):
         if _contains_aisha(raw_text):
             log.info("Keyword 'Aisha' detected — routing to chat")
             user_input = _strip_aisha(raw_text)
-            result = await chat(user_input)
+            result = await chat(user_input, phone=sender)
             if result.image_bytes:
                 await send_image(sender, result.image_bytes)
             if result.text:
@@ -290,6 +295,7 @@ async def handle_image(sender: str, message: dict):
             return
 
         store_pending_image(sender, image_bytes, mime_type)
+        await increment_stat(sender, "images")
 
         caption = message["image"].get("caption", "").strip()
         if caption:
@@ -342,6 +348,7 @@ async def handle_document(sender: str, message: dict):
             return
 
         await send_message(sender, "📄 Processando documento...")
+        await increment_stat(sender, "documents")
 
         document_text = await extract_text_async(doc_bytes, mime_type)
         log.info(f"Text extracted: {len(document_text)} chars from {filename}")
@@ -355,8 +362,14 @@ async def handle_document(sender: str, message: dict):
             return
 
         caption = doc.get("caption", "").strip()
-        summary = await summarize_document(document_text, caption or None)
-        await send_message(sender, summary)
+        prev_id = await get_response_id(sender)
+        result = await chat_with_document(document_text, caption or None, prev_id)
+
+        if result.response_id:
+            await upsert_session(sender, result.response_id)
+
+        if result.text:
+            await send_message(sender, result.text)
 
     except Exception as e:
         log.exception("Document processing failed")

@@ -39,6 +39,10 @@ Envie um áudio **sem mencionar "Aisha"** e ele será transcrito, limpo e devolv
 - Transcrever reuniões, anotações em voz, mensagens longas
 - Transformar um áudio recebido em texto
 
+**Observações:**
+- Áudios longos são divididos automaticamente em partes de 10 minutos e processados em paralelo
+- Formatos suportados: OGG, MP3, M4A, WAV, MP4
+
 ---
 
 ## 3. Chat por Áudio
@@ -52,7 +56,7 @@ Envie um áudio **mencionando "Aisha"** para conversar com ela por voz.
 [áudio] "Aisha, deixa essa mensagem mais formal: [ditado]"
 ```
 
-A palavra "Aisha" no início (ou em qualquer parte) do áudio indica que é uma conversa, não uma transcrição.
+A palavra "Aisha" em qualquer parte do áudio indica que é uma conversa, não uma transcrição.
 
 ---
 
@@ -134,7 +138,38 @@ Aisha: ⏳ Processando imagem...
 
 ---
 
-## 7. Lembretes
+## 7. Documentos (PDF e Word)
+
+Envie um arquivo PDF ou Word (.docx) e a Aisha extrai o texto e gera um resumo. Você também pode dar uma instrução específica junto com o documento.
+
+**Como usar:**
+```
+[Você envia um PDF]
+Aisha: 📄 Processando documento...
+Aisha: [resumo estruturado do documento]
+```
+
+**Com instrução via legenda:**
+```
+[Você envia um contrato.pdf com legenda "quais são as cláusulas de rescisão?"]
+Aisha: 📄 Processando documento...
+Aisha: [resposta focada nas cláusulas de rescisão]
+```
+
+**Possibilidades:**
+- Resumir contratos, relatórios, artigos, atas
+- Extrair informações específicas (datas, valores, nomes)
+- Responder perguntas sobre o conteúdo
+- Traduzir ou reformatar o conteúdo
+
+**Observações:**
+- Formatos suportados: **PDF** e **Word (.docx)**
+- PDFs escaneados (só imagem) não são suportados — apenas PDFs com texto digital
+- Limite de tamanho: 50 MB por documento
+
+---
+
+## 8. Lembretes
 
 A Aisha agenda lembretes e avisa você com antecedência (padrão: 15 minutos antes). Também envia um link para adicionar o evento ao Google Calendar.
 
@@ -216,7 +251,7 @@ Para cancelar: 'cancela o lembrete 1'
 
 ---
 
-## 7. Análise de Vídeos do YouTube
+## 9. Análise de Vídeos do YouTube
 
 A Aisha analisa qualquer vídeo público do YouTube usando o Gemini 2.5 Flash. Basta enviar o link.
 
@@ -249,21 +284,65 @@ Aisha: [análise completa do vídeo]
 "quais os timestamps mais importantes?"
 ```
 
+**Observações:**
+- O link pendente expira após **10 minutos** sem instrução
+- Funciona apenas com vídeos públicos
+
 ---
 
-## 8. Roteamento Automático de Modelo
+## 10. Personalização e Perfil
+
+A Aisha aprende sobre você e se adapta. Você pode definir um contexto pessoal, mudar o idioma da conversa, e consultar o que ela sabe sobre você.
+
+### Contexto pessoal
+
+Envie informações sobre você — a Aisha vai lembrar para sempre e usar em todas as conversas.
+
+```
+"Sou programador, trabalho com Python e moro em Fortaleza"
+"Meu nome é Rodrigo, gosto de tecnologia e café"
+"Quero que você seja mais direta e use menos emojis"
+"Sou estudante de engenharia, me ajuda com termos técnicos"
+```
+
+Você pode atualizar seu contexto a qualquer momento — basta enviar novas informações.
+
+### Mudar o idioma
+
+```
+"Vamos falar em inglês"
+"Podemos conversar em espanhol?"
+"Switch to English"
+```
+
+A Aisha vai responder no idioma escolhido dali em diante.
+
+### O que você sabe de mim?
+
+```
+"O que você sabe sobre mim?"
+"Me diga tudo que sabe de mim"
+"Qual é meu perfil?"
+```
+
+A Aisha lista: contexto pessoal salvo, idioma preferido, lembretes ativos e estatísticas de uso (quantos áudios, imagens, documentos e vídeos você já processou).
+
+---
+
+## 11. Roteamento Automático de Modelo
 
 A Aisha escolhe automaticamente o melhor modelo para cada mensagem — você não precisa fazer nada:
 
 | Tipo de mensagem | Modelo usado |
 |---|---|
-| Saudações, perguntas simples, bate-papo | `gpt-4.1` — rápido e barato |
+| Classificação de complexidade | `gpt-4.1-mini` — barato e rápido |
+| Saudações, perguntas simples, bate-papo | `gpt-4.1` — rápido |
 | Pesquisa, raciocínio, tarefas técnicas | `gpt-5.4` — mais capaz |
-| Geração de imagem | `gpt-image-1.5` (via `gpt-5.4`) |
-| Edição de imagem (foto do usuário) | `gpt-image-1.5` (via `gpt-5.4` + input multimodal) |
+| Geração e edição de imagem | `gpt-5.4` + ferramenta `image_generation` |
 | Transcrição de áudio | `whisper-1` |
 | Refinamento de transcrição | `gpt-4o-mini` |
 | Extração de intenção de lembrete | `gpt-4o-mini` |
+| Resumo de documentos PDF/DOCX | `gpt-4.1` |
 | Análise de vídeo YouTube | `gemini-2.5-flash` |
 
 ---
@@ -276,7 +355,7 @@ A Aisha escolhe automaticamente o melhor modelo para cada mensagem — você nã
 ```
 
 **Áudio longo para transcrição:**
-- Pode enviar áudios de até vários minutos — o sistema divide automaticamente em partes
+- Pode enviar áudios de até vários minutos — o sistema divide automaticamente em partes de 10 minutos
 
 **Fuso horário:**
 - Os lembretes usam o fuso configurado no servidor (`America/Sao_Paulo` por padrão)
@@ -288,3 +367,4 @@ A Aisha escolhe automaticamente o melhor modelo para cada mensagem — você nã
 
 **Idioma:**
 - A Aisha responde no idioma que você escrever — português, inglês, espanhol, etc.
+- Você pode definir um idioma fixo com "vamos falar em inglês" — a preferência fica salva

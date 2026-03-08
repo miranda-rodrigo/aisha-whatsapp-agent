@@ -3,16 +3,21 @@
 Routing strategy:
   - gpt-4.1-mini  → classify complexity (cheap, fast)
   - gpt-4.1       → simple/casual messages (greetings, direct questions)
+  - gpt-4.1       → self-awareness questions (skills/capabilities, injected from aisha_skills.md)
   - gpt-5.4       → complex messages (reasoning, web search, image generation)
   - gpt-5.4 + image_generation → image editing/generation from user photos
+  - gpt-4.1       → document Q&A (document text injected as context)
 """
 
 import base64
 import logging
 import re
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
 
 from openai import AsyncOpenAI
+from pydantic import BaseModel, Field
 
 from config import OPENAI_API_KEY
 
@@ -23,7 +28,7 @@ Você é Aisha, uma assistente pessoal inteligente e amigável. \
 Responda de forma objetiva e útil. Use o idioma do usuário."""
 
 _CLASSIFIER_PROMPT = """\
-Classify the user message as SIMPLE or COMPLEX.
+Classify the user message as SIMPLE, COMPLEX, or SELF.
 
 SIMPLE: casual chat, greetings, short direct questions, small talk, \
 confirmations, reactions (e.g. "oi", "blz?", "como vai?", "obrigado", \
@@ -33,7 +38,14 @@ COMPLEX: requires web search, image generation, multi-step reasoning, \
 calculations, writing/editing long texts, research, technical questions, \
 code, planning, or anything that benefits from a more capable model.
 
-Reply with exactly one word: SIMPLE or COMPLEX."""
+SELF: questions about Aisha herself — what she can do, her skills or abilities, \
+how to use a feature, her limitations, who she is, how she works. \
+This includes questions like "o que você faz?", "você consegue X?", \
+"como funciona a transcrição?", "quais são seus skills?", "quem é você?", \
+"como envio um documento?", "você pode criar lembretes?", \
+"você analisa vídeos do YouTube?".
+
+Reply with exactly one word: SIMPLE, COMPLEX, or SELF."""
 
 _NEW_SESSION_PATTERNS = [
     r"\bnova conversa\b",
@@ -49,6 +61,47 @@ O usuário enviou uma imagem e está dando instruções sobre o que fazer com el
 Execute a instrução do usuário sobre a imagem. Isso pode incluir: melhorar a imagem, \
 editar elementos, mudar estilo, gerar uma nova imagem baseada nesta, descrever a imagem, \
 extrair texto, remover fundo, etc. Use a ferramenta de geração de imagem quando apropriado."""
+
+_skills_path = Path(__file__).parent / "aisha_skills.md"
+_SKILLS_CONTENT: str = _skills_path.read_text(encoding="utf-8") if _skills_path.exists() else ""
+
+_SELF_INSTRUCTIONS = f"""\
+{SYSTEM_PROMPT}
+
+Você tem acesso ao seu próprio guia de habilidades abaixo. Use-o para responder \
+perguntas sobre o que você sabe fazer, como usar cada funcionalidade e suas limitações. \
+Responda de forma amigável e concisa. Se o usuário pedir detalhes de uma funcionalidade, \
+dê exemplos práticos de uso.
+
+Funcionalidades especiais que você deve conhecer:
+- O usuário pode te enviar um contexto pessoal (quem ele é, preferências, etc.) e você \
+vai lembrar para sempre. Ele pode atualizar esse contexto quando quiser.
+- O usuário pode pedir para mudar o idioma da conversa (ex: "vamos falar em inglês").
+- O usuário pode perguntar "o que você sabe de mim?" e você lista tudo: contexto pessoal, \
+lembretes ativos, preferências e estatísticas de uso.
+
+---
+{_SKILLS_CONTENT}
+"""
+
+_SELF_ACTION_PROMPT = """\
+Analyze the user message and determine the self-awareness action.
+
+- "skills": asking about Aisha's capabilities, how to use features, who she is
+- "set_context": user is providing personal context about themselves (name, job, \
+preferences, personality instructions for Aisha, etc.)
+- "set_language": user wants to change the conversation language
+- "list_profile": user wants to know what Aisha knows about them, their data, profile
+
+Extract context_to_save when action is set_context (the full personal context text).
+Extract language_to_save when action is set_language (e.g. "english", "português", "español")."""
+
+
+class SelfAction(BaseModel):
+    action: Literal["skills", "set_context", "set_language", "list_profile"]
+    context_to_save: str | None = Field(None, description="Personal context to save")
+    language_to_save: str | None = Field(None, description="Language preference to save")
+
 
 _client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
@@ -69,7 +122,7 @@ def wants_new_session(text: str) -> bool:
 
 
 async def _classify(user_input: str) -> str:
-    """Return 'SIMPLE' or 'COMPLEX' using gpt-4.1-mini as a cheap classifier."""
+    """Return 'SIMPLE', 'COMPLEX', or 'SELF' using gpt-4.1-mini as a cheap classifier."""
     response = await _client.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[
@@ -80,31 +133,52 @@ async def _classify(user_input: str) -> str:
         temperature=0,
     )
     label = response.choices[0].message.content.strip().upper()
+    if label.startswith("SELF"):
+        return "SELF"
     return "SIMPLE" if label.startswith("SIMPLE") else "COMPLEX"
+
+
+def _build_instructions(base: str, profile: dict | None) -> str:
+    """Append user profile context and language preference to base instructions."""
+    if not profile:
+        return base
+    parts = [base]
+    if profile.get("personal_context"):
+        parts.append(f"\nContexto pessoal do usuário:\n{profile['personal_context']}")
+    if profile.get("language"):
+        parts.append(f"\nIdioma preferido do usuário: {profile['language']}. Responda nesse idioma.")
+    return "\n".join(parts)
 
 
 async def chat(
     user_input: str,
     previous_response_id: str | None = None,
+    phone: str | None = None,
 ) -> ChatResult:
-    """Route to gpt-4.1 or gpt-5.4 based on message complexity."""
+    """Route to gpt-4.1, gpt-5.4, or self-awareness handler based on message classification."""
+    from user_profile import get_profile
+
+    profile = await get_profile(phone) if phone else None
     complexity = await _classify(user_input)
     log.info(f"Chat [{complexity}]: {user_input[:120]} (prev={previous_response_id})")
 
-    if complexity == "SIMPLE":
-        return await _chat_simple(user_input, previous_response_id)
+    if complexity == "SELF":
+        return await _chat_self(user_input, previous_response_id, phone, profile)
+    elif complexity == "SIMPLE":
+        return await _chat_simple(user_input, previous_response_id, profile)
     else:
-        return await _chat_complex(user_input, previous_response_id)
+        return await _chat_complex(user_input, previous_response_id, profile)
 
 
 async def _chat_simple(
     user_input: str,
     previous_response_id: str | None,
+    profile: dict | None = None,
 ) -> ChatResult:
     """Handle simple messages with gpt-4.1 via Responses API."""
     kwargs: dict = {
         "model": "gpt-4.1",
-        "instructions": SYSTEM_PROMPT,
+        "instructions": _build_instructions(SYSTEM_PROMPT, profile),
         "input": user_input,
     }
     if previous_response_id:
@@ -128,14 +202,111 @@ async def _chat_simple(
     return result
 
 
+async def _detect_self_action(user_input: str) -> SelfAction:
+    """Detect sub-intent within SELF category using structured output."""
+    response = await _client.beta.chat.completions.parse(
+        model="gpt-4.1-mini",
+        messages=[
+            {"role": "system", "content": _SELF_ACTION_PROMPT},
+            {"role": "user", "content": user_input},
+        ],
+        response_format=SelfAction,
+        temperature=0,
+    )
+    return response.choices[0].message.parsed
+
+
+async def _chat_self(
+    user_input: str,
+    previous_response_id: str | None,
+    phone: str | None = None,
+    profile: dict | None = None,
+) -> ChatResult:
+    """Handle self-awareness questions, profile customization, and user data queries."""
+    from reminder_store import get_reminders
+    from user_profile import get_profile, upsert_context, upsert_language
+
+    action = await _detect_self_action(user_input)
+    log.info(f"Self action: {action.action} for {phone}")
+
+    if action.action == "set_context" and action.context_to_save and phone:
+        existing = profile.get("personal_context", "") if profile else ""
+        if existing:
+            new_context = f"{existing}\n{action.context_to_save}"
+        else:
+            new_context = action.context_to_save
+        await upsert_context(phone, new_context)
+
+    if action.action == "set_language" and action.language_to_save and phone:
+        await upsert_language(phone, action.language_to_save)
+
+    extra_user_data = ""
+    if action.action == "list_profile" and phone:
+        fresh_profile = await get_profile(phone)
+        reminders = await get_reminders(phone)
+
+        parts = ["DADOS DO USUÁRIO PARA LISTAR:\n"]
+        ctx = fresh_profile.get("personal_context", "") if fresh_profile else ""
+        lang = fresh_profile.get("language", "") if fresh_profile else ""
+        stats = fresh_profile.get("stats", {}) if fresh_profile else {}
+
+        parts.append(f"Contexto pessoal: {ctx if ctx else 'nenhum definido'}")
+        parts.append(f"Idioma preferido: {lang if lang else 'nenhum definido (padrão: idioma do usuário)'}")
+
+        if stats:
+            stat_lines = [f"  - {k}: {v}" for k, v in stats.items()]
+            parts.append("Estatísticas de uso:\n" + "\n".join(stat_lines))
+        else:
+            parts.append("Estatísticas de uso: nenhuma ainda")
+
+        if reminders:
+            reminder_lines = [f"  - {r['message']} ({r['scheduled_at']})" for r in reminders]
+            parts.append(f"Lembretes ativos ({len(reminders)}):\n" + "\n".join(reminder_lines))
+        else:
+            parts.append("Lembretes ativos: nenhum")
+
+        extra_user_data = "\n".join(parts)
+
+    instructions = _build_instructions(_SELF_INSTRUCTIONS, profile)
+    input_text = user_input
+    if extra_user_data:
+        input_text = f"{user_input}\n\n---\n{extra_user_data}"
+
+    kwargs: dict = {
+        "model": "gpt-4.1",
+        "instructions": instructions,
+        "input": input_text,
+    }
+    if previous_response_id:
+        kwargs["previous_response_id"] = previous_response_id
+
+    response = await _client.responses.create(**kwargs)
+
+    text_parts = [
+        content.text
+        for item in response.output
+        if item.type == "message"
+        for content in item.content
+        if content.type == "output_text"
+    ]
+
+    result = ChatResult(
+        text="\n".join(text_parts) if text_parts else None,
+        response_id=response.id,
+    )
+    log.info(f"Self result: action={action.action}, text={bool(result.text)}, id={result.response_id}")
+    return result
+
+
 async def _chat_complex(
     user_input: str,
     previous_response_id: str | None,
+    profile: dict | None = None,
 ) -> ChatResult:
     """Handle complex messages with gpt-5.4 + web_search + image_generation."""
     kwargs: dict = {
         "model": "gpt-5.4",
-        "instructions": SYSTEM_PROMPT,
+        "instructions": _build_instructions(SYSTEM_PROMPT, profile),
         "input": user_input,
         "tools": [
             {"type": "web_search"},
@@ -223,4 +394,46 @@ async def chat_with_image(
         f"Image chat result: text={bool(result.text)}, "
         f"image={bool(result.image_bytes)}, id={result.response_id}"
     )
+    return result
+
+
+_DOCUMENT_INSTRUCTIONS = """\
+O usuário enviou um documento. O conteúdo completo está abaixo. \
+Responda perguntas sobre ele com precisão, citando trechos quando relevante. \
+Se o usuário não fizer uma pergunta, faça um resumo estruturado."""
+
+
+async def chat_with_document(
+    document_text: str,
+    user_instruction: str | None,
+    previous_response_id: str | None = None,
+) -> ChatResult:
+    """Summarize a document and persist the session so follow-up questions work."""
+    user_message = f"DOCUMENTO:\n\n{document_text}"
+    if user_instruction:
+        user_message = f"INSTRUÇÃO: {user_instruction}\n\n{user_message}"
+
+    kwargs: dict = {
+        "model": "gpt-4.1",
+        "instructions": f"{SYSTEM_PROMPT}\n\n{_DOCUMENT_INSTRUCTIONS}",
+        "input": user_message,
+    }
+    if previous_response_id:
+        kwargs["previous_response_id"] = previous_response_id
+
+    response = await _client.responses.create(**kwargs)
+
+    text_parts = [
+        content.text
+        for item in response.output
+        if item.type == "message"
+        for content in item.content
+        if content.type == "output_text"
+    ]
+
+    result = ChatResult(
+        text="\n".join(text_parts) if text_parts else None,
+        response_id=response.id,
+    )
+    log.info(f"Document chat result: text={bool(result.text)}, id={result.response_id}")
     return result

@@ -59,11 +59,16 @@ class ReminderExtraction(BaseModel):
     lead_minutes: int = Field(REMINDER_LEAD_MINUTES, description="Minutes of advance notice")
 
 
-_EXTRACT_SYSTEM = f"""\
-You extract reminder actions from user messages. Today's date/time context: the user is in {USER_TIMEZONE}.
+def _build_extract_system() -> str:
+    now = _now_local()
+    return f"""\
+You extract reminder actions from user messages.
+Current date/time: {now.strftime('%Y-%m-%d %H:%M')} ({USER_TIMEZONE}).
 
 For 'create': extract the reminder message, datetime expression as written (do NOT translate), \
 whether it recurs, and optionally an RRULE for recurrence.
+When the user says only a time (e.g. "1830", "18h30", "6:30 PM") without a date, \
+assume TODAY if the time is still in the future, or TOMORROW if it already passed.
 For 'list': user wants to see their reminders.
 For 'cancel': user wants to delete a reminder. Extract reminder_number if they say "lembrete 1" or "#1".
 For 'edit': user wants to change a reminder's time. Extract reminder_number and new_datetime_raw.
@@ -94,6 +99,12 @@ def _gcal_link(title: str, start_utc: datetime, duration_min: int = 60) -> str:
     return "https://calendar.google.com/calendar/render?" + urlencode(params)
 
 
+def _now_local() -> datetime:
+    """Return the current time in the user's timezone."""
+    import zoneinfo
+    return datetime.now(zoneinfo.ZoneInfo(USER_TIMEZONE))
+
+
 def _parse_dt(raw: str) -> datetime | None:
     """Parse a natural language datetime string to UTC."""
     dt = dateparser.parse(
@@ -103,7 +114,7 @@ def _parse_dt(raw: str) -> datetime | None:
             "RETURN_AS_TIMEZONE_AWARE": True,
             "TIMEZONE": USER_TIMEZONE,
             "TO_TIMEZONE": "UTC",
-            "RELATIVE_BASE": datetime.now(),
+            "RELATIVE_BASE": _now_local().replace(tzinfo=None),
         },
     )
     return dt
@@ -121,7 +132,7 @@ async def _extract(text: str) -> ReminderExtraction:
     response = await _client.beta.chat.completions.parse(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": _EXTRACT_SYSTEM},
+            {"role": "system", "content": _build_extract_system()},
             {"role": "user", "content": text},
         ],
         response_format=ReminderExtraction,
@@ -237,8 +248,30 @@ async def _handle_create(
     if not scheduled_at:
         return f"Não consegui entender o horário '{ex.datetime_raw}'. Tente ser mais específico, ex: 'amanhã às 10h'."
 
-    if scheduled_at <= datetime.now(timezone.utc):
-        return "Esse horário já passou. Por favor, escolha um horário futuro."
+    now_utc = datetime.now(timezone.utc)
+    diff_minutes = (scheduled_at - now_utc).total_seconds() / 60
+
+    if diff_minutes < -60:
+        local_display = _fmt_local(scheduled_at)
+        return (
+            f"O horário {local_display} já passou. Você quis dizer amanhã no mesmo horário?\n\n"
+            f"Se sim, diga: 'me lembra amanhã às {_fmt_local(scheduled_at).split(' às ')[1]}'"
+        )
+
+    if diff_minutes < 0:
+        local_display = _fmt_local(scheduled_at)
+        return (
+            f"O horário {local_display} acabou de passar (há {abs(int(diff_minutes))} minutos). "
+            f"Quer que eu crie para amanhã no mesmo horário?"
+        )
+
+    if diff_minutes < ex.lead_minutes:
+        local_display = _fmt_local(scheduled_at)
+        return (
+            f"O lembrete para {local_display} é daqui a menos de {ex.lead_minutes} minutos — "
+            f"não daria tempo de avisar com antecedência. Quer que eu crie mesmo assim? "
+            f"O aviso será enviado imediatamente."
+        )
 
     message = ex.message or ex.datetime_raw
     reminder = Reminder(
