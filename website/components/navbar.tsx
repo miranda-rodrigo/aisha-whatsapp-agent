@@ -16,7 +16,7 @@ export function Navbar() {
   const [isOpen, setIsOpen] = useState(false)
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-lg border-b border-border">
+    <header className="fixed top-10 left-0 right-0 z-50 bg-background/80 backdrop-blur-lg border-b border-border">
       <div className="max-w-7xl mx-auto px-4">
         <nav className="flex items-center justify-between h-16">
           {/* Logo */}
@@ -41,7 +41,7 @@ export function Navbar() {
           {/* CTA Button */}
           <div className="hidden md:block">
             <Button size="sm" className="gap-2" asChild>
-              <a href="https://wa.me/5585941322222" target="_blank" rel="noopener noreferrer">
+              <a href="https://wa.me/5585994132222" target="_blank" rel="noopener noreferrer">
                 <MessageCircle className="h-4 w-4" />
                 Conversar
               </a>
@@ -81,7 +81,7 @@ export function Navbar() {
                 </a>
               ))}
               <Button size="sm" className="gap-2 w-full" asChild>
-                <a href="https://wa.me/5585941322222" target="_blank" rel="noopener noreferrer">
+                <a href="https://wa.me/5585994132222" target="_blank" rel="noopener noreferrer">
                   <MessageCircle className="h-4 w-4" />
                   Conversar com Aisha
                 </a>

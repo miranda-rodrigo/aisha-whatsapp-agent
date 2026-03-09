@@ -10,6 +10,11 @@ import { Footer } from "@/components/footer"
 export default function Home() {
   return (
     <main className="min-h-screen bg-background">
+      <div className="fixed top-0 left-0 right-0 z-[60] w-full bg-primary/10 border-b border-primary/20 text-center py-2 px-4">
+        <p className="text-sm text-primary font-medium">
+          🚀 No momento aberto apenas para <strong>beta-testers</strong> — disponível em breve para o público geral!
+        </p>
+      </div>
       <Navbar />
       <Hero />
       <TechStack />

@@ -33,14 +33,14 @@ export function CTA() {
             </p>
             
             <Button size="lg" className="gap-2 text-lg px-8 py-6" asChild>
-              <a href="https://wa.me/5585941322222" target="_blank" rel="noopener noreferrer">
+              <a href="https://wa.me/5585994132222" target="_blank" rel="noopener noreferrer">
                 <MessageCircle className="h-6 w-6" />
                 Conversar com Aisha
               </a>
             </Button>
             
             <p className="text-sm text-muted-foreground mt-6">
-              +55 85 9413-2222
+              +55 85 9 9413-2222
             </p>
           </div>
         </div>

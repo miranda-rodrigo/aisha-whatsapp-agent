@@ -52,7 +52,7 @@ export function Hero() {
           className="flex flex-col sm:flex-row items-center justify-center gap-4"
         >
           <Button size="lg" className="gap-2 text-base px-6 py-6" asChild>
-            <a href="https://wa.me/5585941322222" target="_blank" rel="noopener noreferrer">
+            <a href="https://wa.me/5585994132222" target="_blank" rel="noopener noreferrer">
               <MessageCircle className="h-5 w-5" />
               Conversar com Aisha
             </a>
