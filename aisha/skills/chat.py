@@ -155,7 +155,7 @@ async def classify(user_input: str) -> str:
             {"role": "system", "content": _CLASSIFIER_PROMPT},
             {"role": "user", "content": user_input},
         ],
-        max_tokens=5,
+        max_completion_tokens=5,
         temperature=0,
     )
     label = response.choices[0].message.content.strip().upper().replace("-", "_")
