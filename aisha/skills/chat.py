@@ -1,7 +1,7 @@
 """Aisha chat skill using OpenAI Responses API.
 
 Routing strategy:
-  - gemini-3.1-flash-lite-preview → classify complexity (cheap, fast)
+  - gpt-5.2       → classify intent (SCHEDULED_TASK, REMINDER, SELF, SIMPLE, COMPLEX)
   - gpt-4.1-mini  → detect self-awareness sub-action (structured output)
   - gpt-4.1       → simple/casual messages (greetings, direct questions)
   - gpt-4.1       → self-awareness questions (skills/capabilities, injected from aisha_skills.md)
@@ -19,12 +19,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from google import genai
-from google.genai import types as genai_types
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
-from aisha.config import GEMINI_API_KEY, OPENAI_API_KEY, USER_TIMEZONE
+from aisha.config import OPENAI_API_KEY, USER_TIMEZONE
 
 log = logging.getLogger(__name__)
 
@@ -128,15 +126,7 @@ class SelfAction(BaseModel):
 
 _client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
-_gemini_client: genai.Client | None = None
-_GEMINI_CLASSIFIER_MODEL = "gemini-3.1-flash-lite-preview"
-
-
-def _get_gemini_client() -> genai.Client:
-    global _gemini_client
-    if _gemini_client is None:
-        _gemini_client = genai.Client(api_key=GEMINI_API_KEY)
-    return _gemini_client
+_CLASSIFIER_MODEL = "gpt-5.2"
 
 
 @dataclass
@@ -158,17 +148,17 @@ _VALID_LABELS = {"SCHEDULED_TASK", "REMINDER", "SELF", "SIMPLE", "COMPLEX"}
 
 
 async def classify(user_input: str) -> str:
-    """Classify intent using Gemini Flash Lite. Returns one of the _VALID_LABELS."""
-    response = await _get_gemini_client().aio.models.generate_content(
-        model=_GEMINI_CLASSIFIER_MODEL,
-        contents=user_input,
-        config=genai_types.GenerateContentConfig(
-            system_instruction=_CLASSIFIER_PROMPT,
-            max_output_tokens=5,
-            temperature=0,
-        ),
+    """Classify intent using gpt-5.2. Returns one of the _VALID_LABELS."""
+    response = await _client.chat.completions.create(
+        model=_CLASSIFIER_MODEL,
+        messages=[
+            {"role": "system", "content": _CLASSIFIER_PROMPT},
+            {"role": "user", "content": user_input},
+        ],
+        max_tokens=5,
+        temperature=0,
     )
-    label = response.text.strip().upper().replace("-", "_")
+    label = response.choices[0].message.content.strip().upper().replace("-", "_")
     for valid in _VALID_LABELS:
         if label.startswith(valid):
             return valid
