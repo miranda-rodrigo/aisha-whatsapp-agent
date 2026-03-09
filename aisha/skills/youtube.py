@@ -79,15 +79,33 @@ def clear_pending_video(phone: str) -> None:
 
 async def analyze_video(url: str, instruction: str) -> str:
     """Send the YouTube URL + instruction to Gemini and return the text response."""
+    from google.api_core.exceptions import PermissionDenied, InvalidArgument
+
     prompt = instruction.strip() if instruction.strip() else _DEFAULT_PROMPT
 
     log.info(f"Analyzing YouTube video: {url} | prompt: {prompt[:80]}")
 
-    response = await _get_client().aio.models.generate_content(
-        model=_MODEL,
-        contents=[
-            types.Part.from_uri(file_uri=url, mime_type="video/mp4"),
-            prompt,
-        ],
-    )
-    return response.text
+    try:
+        response = await _get_client().aio.models.generate_content(
+            model=_MODEL,
+            contents=[
+                types.Part.from_uri(file_uri=url, mime_type="video/mp4"),
+                prompt,
+            ],
+        )
+        return response.text
+    except PermissionDenied:
+        log.warning(f"Gemini 403 for {url} — live stream or restricted video")
+        return (
+            "Não consegui acessar esse vídeo. Isso geralmente acontece com:\n\n"
+            "• *Lives ao vivo* — só funciona após o vídeo ser publicado\n"
+            "• Vídeos com *restrição de idade* ou *região*\n"
+            "• Vídeos *privados* ou *não listados*\n\n"
+            "Tente novamente depois que a live terminar e o vídeo estiver disponível."
+        )
+    except InvalidArgument as e:
+        log.warning(f"Gemini InvalidArgument for {url}: {e}")
+        return (
+            "Não consegui processar esse vídeo. "
+            "Verifique se o link é válido e o vídeo está disponível publicamente."
+        )

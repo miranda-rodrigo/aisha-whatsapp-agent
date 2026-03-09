@@ -65,7 +65,22 @@ async def upsert_language(phone: str, language: str) -> None:
 
 
 async def increment_stat(phone: str, key: str) -> None:
-    """Increment a usage counter in the stats JSONB field."""
+    """Increment a usage counter in the stats JSONB field atomically via Supabase RPC."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{SUPABASE_URL}/rest/v1/rpc/increment_stat",
+            headers=_HEADERS,
+            json={"p_phone": phone, "p_key": key},
+        )
+    if resp.status_code not in (200, 204):
+        log.warning(f"increment_stat RPC failed ({resp.status_code}), falling back to GET+POST")
+        await _increment_stat_fallback(phone, key)
+    else:
+        log.info(f"Stat incremented for {phone}: {key}")
+
+
+async def _increment_stat_fallback(phone: str, key: str) -> None:
+    """Fallback: GET + POST (non-atomic). Used only if RPC is unavailable."""
     profile = await get_profile(phone)
     stats = profile.get("stats", {}) if profile else {}
     stats[key] = stats.get(key, 0) + 1
@@ -80,4 +95,4 @@ async def increment_stat(phone: str, key: str) -> None:
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             },
         )
-    log.info(f"Stat incremented for {phone}: {key}={stats[key]}")
+    log.info(f"Stat incremented (fallback) for {phone}: {key}={stats[key]}")

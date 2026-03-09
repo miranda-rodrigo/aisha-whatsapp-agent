@@ -117,13 +117,21 @@ _DB_URL = (
 )
 
 
+_LAST_REPLY_TTL_SECONDS = 60  # só precisamos de ~5s para echo detection; 60s é folga segura
+
 async def _periodic_download_cleanup():
-    """Background task: remove expired temporary video files every 15 minutes."""
+    """Background task: remove expired temporary video files and stale echo-detection entries every 15 minutes."""
     while True:
         await asyncio.sleep(15 * 60)
         removed = cleanup_expired()
         if removed:
             log.info(f"Cleaned up {removed} expired download(s)")
+        cutoff = time.time() - _LAST_REPLY_TTL_SECONDS
+        stale = [k for k, v in _last_reply_time.items() if v < cutoff]
+        for k in stale:
+            del _last_reply_time[k]
+        if stale:
+            log.info(f"Cleaned up {len(stale)} stale echo-detection entr{'y' if len(stale) == 1 else 'ies'}")
 
 
 @asynccontextmanager
@@ -296,55 +304,74 @@ async def handle_chat(sender: str, text: str):
         # 2. Pending image instruction
         pending_img = get_pending_image(sender)
         if pending_img:
-            log.info(f"Pending image found for {sender} — using text as instruction")
-            await _process_image_instruction(sender, text, pending_img)
-            return
+            intent = await classify(text)
+            if intent in ("REMINDER", "SCHEDULED_TASK", "SELF"):
+                log.info(
+                    f"Pending image for {sender} ignored — message classified as {intent}: {text[:60]}"
+                )
+            else:
+                log.info(f"Pending image found for {sender} — using text as instruction")
+                await _process_image_instruction(sender, text, pending_img)
+                return
 
         # 3. Pending YouTube video — user is now sending the instruction
         pending_yt = get_pending_video(sender)
         if pending_yt:
-            log.info(f"Pending YouTube for {sender} — instruction: {text[:60]}")
-            clear_pending_video(sender)
-            if _is_download_intent(text):
-                await send_message(sender, "⏳ Baixando vídeo...")
-                try:
-                    token, filename = await download_video(pending_yt.url)
-                    link = f"{BASE_URL}/download/{token}"
-                    await send_message(
-                        sender,
-                        f"✅ *{filename}*\n\n"
-                        f"🔗 Link de download (expira em 30 min):\n{link}",
-                    )
-                    await increment_stat(sender, "video_downloads")
-                except Exception as exc:
-                    log.exception("Video download failed")
-                    await send_message(sender, f"Não consegui baixar o vídeo: {exc}")
+            intent = await classify(text)
+            if intent in ("REMINDER", "SCHEDULED_TASK", "SELF"):
+                # User is doing something unrelated — keep video pending and fall through
+                log.info(
+                    f"Pending YouTube for {sender} ignored — message classified as {intent}: {text[:60]}"
+                )
             else:
-                await send_message(sender, "⏳ Analisando vídeo...")
-                await increment_stat(sender, "youtube")
-                reply = await analyze_video(pending_yt.url, text)
-                await send_message(sender, reply)
-            return
+                log.info(f"Pending YouTube for {sender} — instruction: {text[:60]}")
+                clear_pending_video(sender)
+                if _is_download_intent(text):
+                    await send_message(sender, "⏳ Baixando vídeo...")
+                    try:
+                        token, filename = await download_video(pending_yt.url)
+                        link = f"{BASE_URL}/download/{token}"
+                        await send_message(
+                            sender,
+                            f"✅ *{filename}*\n\n"
+                            f"🔗 Link de download (expira em 30 min):\n{link}",
+                        )
+                        await increment_stat(sender, "video_downloads")
+                    except Exception as exc:
+                        log.exception("Video download failed")
+                        await send_message(sender, f"Não consegui baixar o vídeo: {exc}")
+                else:
+                    await send_message(sender, "⏳ Analisando vídeo...")
+                    await increment_stat(sender, "youtube")
+                    reply = await analyze_video(pending_yt.url, text)
+                    await send_message(sender, reply)
+                return
 
         # 4. Pending webpage — user is now sending the instruction
         pending_page = get_pending_page(sender)
         if pending_page:
-            log.info(f"Pending webpage for {sender} — processing with instruction: {text[:60]}")
-            clear_pending_page(sender)
-            await send_message(sender, "⏳ Lendo página...")
-            await increment_stat(sender, "webpages")
-            try:
-                content = await fetch_page(pending_page.url)
-                prev_id = await get_response_id(sender)
-                result = await chat_with_webpage(content, pending_page.url, text, prev_id)
-                if result.response_id:
-                    await upsert_session(sender, result.response_id)
-                if result.text:
-                    await send_message(sender, result.text)
-            except Exception as e:
-                log.exception("Webpage processing failed")
-                await send_message(sender, f"Não consegui acessar a página: {e}")
-            return
+            intent = await classify(text)
+            if intent in ("REMINDER", "SCHEDULED_TASK", "SELF"):
+                log.info(
+                    f"Pending webpage for {sender} ignored — message classified as {intent}: {text[:60]}"
+                )
+            else:
+                log.info(f"Pending webpage for {sender} — processing with instruction: {text[:60]}")
+                clear_pending_page(sender)
+                await send_message(sender, "⏳ Lendo página...")
+                await increment_stat(sender, "webpages")
+                try:
+                    content = await fetch_page(pending_page.url)
+                    prev_id = await get_response_id(sender)
+                    result = await chat_with_webpage(content, pending_page.url, text, prev_id)
+                    if result.response_id:
+                        await upsert_session(sender, result.response_id)
+                    if result.text:
+                        await send_message(sender, result.text)
+                except Exception as e:
+                    log.exception("Webpage processing failed")
+                    await send_message(sender, f"Não consegui acessar a página: {e}")
+                return
 
         # 5. Video download URL (YouTube or X/Twitter with "baixa"/"download" intent)
         video_url = extract_video_url(text)
