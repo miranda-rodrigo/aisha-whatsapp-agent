@@ -25,14 +25,22 @@ export function Footer() {
             <p>Fortaleza, CE — CEP 60822-130</p>
           </div>
 
-          <a
-            href="https://wa.me/5585999065040"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-          >
-            📱 (85) 99906-5040
-          </a>
+          <div className="flex flex-col items-start md:items-end gap-2">
+            <a
+              href="https://wa.me/5585999065040"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              📱 (85) 99906-5040
+            </a>
+            <a
+              href="/privacy"
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
+            >
+              Política de Privacidade
+            </a>
+          </div>
         </div>
       </div>
     </footer>
