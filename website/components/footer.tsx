@@ -40,6 +40,18 @@ export function Footer() {
             >
               Política de Privacidade
             </a>
+            <a
+              href="/terms"
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
+            >
+              Termos de Serviço
+            </a>
+            <a
+              href="/delete"
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
+            >
+              Exclusão de Dados
+            </a>
           </div>
         </div>
       </div>
