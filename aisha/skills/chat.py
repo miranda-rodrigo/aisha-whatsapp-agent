@@ -1,7 +1,8 @@
 """Aisha chat skill using OpenAI Responses API.
 
 Routing strategy:
-  - gpt-4.1-mini  → classify complexity (cheap, fast)
+  - gemini-3.1-flash-lite-preview → classify complexity (cheap, fast)
+  - gpt-4.1-mini  → detect self-awareness sub-action (structured output)
   - gpt-4.1       → simple/casual messages (greetings, direct questions)
   - gpt-4.1       → self-awareness questions (skills/capabilities, injected from aisha_skills.md)
   - gpt-5.4       → complex messages (reasoning, web search, image generation)
@@ -18,10 +19,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
+from google import genai
+from google.genai import types as genai_types
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
-from aisha.config import OPENAI_API_KEY, USER_TIMEZONE
+from aisha.config import GEMINI_API_KEY, OPENAI_API_KEY, USER_TIMEZONE
 
 log = logging.getLogger(__name__)
 
@@ -118,6 +121,16 @@ class SelfAction(BaseModel):
 
 _client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
+_gemini_client: genai.Client | None = None
+_GEMINI_CLASSIFIER_MODEL = "gemini-3.1-flash-lite-preview"
+
+
+def _get_gemini_client() -> genai.Client:
+    global _gemini_client
+    if _gemini_client is None:
+        _gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+    return _gemini_client
+
 
 @dataclass
 class ChatResult:
@@ -135,17 +148,17 @@ def wants_new_session(text: str) -> bool:
 
 
 async def classify(user_input: str) -> str:
-    """Return 'SIMPLE', 'COMPLEX', or 'SELF' using gpt-4.1-mini as a cheap classifier."""
-    response = await _client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[
-            {"role": "system", "content": _CLASSIFIER_PROMPT},
-            {"role": "user", "content": user_input},
-        ],
-        max_tokens=5,
-        temperature=0,
+    """Return 'SIMPLE', 'COMPLEX', or 'SELF' using Gemini Flash Lite as a cheap classifier."""
+    response = await _get_gemini_client().aio.models.generate_content(
+        model=_GEMINI_CLASSIFIER_MODEL,
+        contents=user_input,
+        config=genai_types.GenerateContentConfig(
+            system_instruction=_CLASSIFIER_PROMPT,
+            max_output_tokens=5,
+            temperature=0,
+        ),
     )
-    label = response.choices[0].message.content.strip().upper()
+    label = response.text.strip().upper()
     if label.startswith("SELF"):
         return "SELF"
     return "SIMPLE" if label.startswith("SIMPLE") else "COMPLEX"

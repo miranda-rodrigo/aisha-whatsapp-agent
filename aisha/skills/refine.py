@@ -1,10 +1,13 @@
 """Refine raw transcriptions using an LLM."""
 
-from openai import AsyncOpenAI
+from google import genai
+from google.genai import types
 
-from aisha.config import OPENAI_API_KEY
+from aisha.config import GEMINI_API_KEY
 
-SYSTEM_PROMPT = """\
+_MODEL = "gemini-3.1-flash-lite-preview"
+
+_SYSTEM_PROMPT = """\
 Atue como um editor de textos especializado em transcrições. \
 Sua tarefa é converter a fala natural abaixo em uma linguagem escrita clara e fluida.
 
@@ -24,16 +27,23 @@ Foco: O resultado deve parecer um texto escrito intencionalmente, sem perder a v
 
 Retorne APENAS o texto refinado, sem explicações ou comentários."""
 
-_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+_client: genai.Client | None = None
+
+
+def _get_client() -> genai.Client:
+    global _client
+    if _client is None:
+        _client = genai.Client(api_key=GEMINI_API_KEY)
+    return _client
 
 
 async def refine_transcription(raw_text: str) -> str:
-    response = await _client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": raw_text},
-        ],
-        temperature=0.3,
+    response = await _get_client().aio.models.generate_content(
+        model=_MODEL,
+        contents=raw_text,
+        config=types.GenerateContentConfig(
+            system_instruction=_SYSTEM_PROMPT,
+            temperature=0.3,
+        ),
     )
-    return response.choices[0].message.content.strip()
+    return response.text.strip()
