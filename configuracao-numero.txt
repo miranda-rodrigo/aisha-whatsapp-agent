@@ -1,0 +1,5 @@
+descricao:
+Aisha: sua assistente pessoal no WhatsApp. Baixa vídeos do YouTube e X, cria lembretes com Google Calendar, agenda tarefas recorrentes, gera e edita imagens, transcreve áudios, resume PDFs e muito mais — tudo pelo chat.
+
+titulo:
+Aisha AI
