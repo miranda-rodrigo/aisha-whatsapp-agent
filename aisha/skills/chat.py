@@ -1,7 +1,7 @@
 """Aisha chat skill using OpenAI Responses API.
 
 Routing strategy:
-  - gpt-5.2       → classify intent (SCHEDULED_TASK, REMINDER, SELF, SIMPLE, COMPLEX)
+  - gpt-4.1-mini  → classify intent (SCHEDULED_TASK, REMINDER, SELF, SIMPLE, COMPLEX)
   - gpt-4.1-mini  → detect self-awareness sub-action (structured output)
   - gpt-4.1       → simple/casual messages (greetings, direct questions)
   - gpt-4.1       → self-awareness questions (skills/capabilities, injected from aisha_skills.md)
@@ -126,7 +126,7 @@ class SelfAction(BaseModel):
 
 _client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
-_CLASSIFIER_MODEL = "gpt-5.2"
+_CLASSIFIER_MODEL = "gpt-4.1-mini"
 
 
 @dataclass
@@ -148,14 +148,14 @@ _VALID_LABELS = {"SCHEDULED_TASK", "REMINDER", "SELF", "SIMPLE", "COMPLEX"}
 
 
 async def classify(user_input: str) -> str:
-    """Classify intent using gpt-5.2. Returns one of the _VALID_LABELS."""
+    """Classify intent using gpt-4.1-mini. Returns one of the _VALID_LABELS."""
     response = await _client.chat.completions.create(
         model=_CLASSIFIER_MODEL,
         messages=[
             {"role": "system", "content": _CLASSIFIER_PROMPT},
             {"role": "user", "content": user_input},
         ],
-        max_completion_tokens=5,
+        max_tokens=5,
         temperature=0,
     )
     label = response.choices[0].message.content.strip().upper().replace("-", "_")
