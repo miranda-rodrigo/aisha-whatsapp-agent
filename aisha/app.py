@@ -40,8 +40,8 @@ from aisha.skills.document_state import (
 )
 from aisha.skills.image_state import clear_pending_image, get_pending_image, store_pending_image
 from aisha.skills.refine import refine_transcription
-from aisha.skills.reminder import handle_reminder, is_reminder_intent
-from aisha.skills.scheduled_task import handle_scheduled_task, is_scheduled_task_intent, restore_scheduled_jobs
+from aisha.skills.reminder import handle_reminder
+from aisha.skills.scheduled_task import handle_scheduled_task, restore_scheduled_jobs
 from aisha.session import delete_session, get_response_id, upsert_session
 from aisha.skills.transcribe import transcribe_audio_bytes
 from aisha.user_profile import increment_stat
@@ -425,37 +425,34 @@ async def handle_chat(sender: str, text: str):
                 )
             return
 
-        # 8. Classify intent (LLM) — SELF goes straight to chat, skipping skill routers
-        complexity = await classify(text)
-        log.info(f"Classified as {complexity}: {text[:80]}")
+        # 8. Classify intent (LLM) — single call routes to skill or chat
+        intent = await classify(text)
+        log.info(f"Classified as {intent}: {text[:80]}")
 
-        if complexity != "SELF":
-            # 8a. Scheduled task intent
-            if is_scheduled_task_intent(text):
-                log.info(f"Scheduled task intent detected for {sender}")
-                reply = await handle_scheduled_task(sender, text, scheduler)
-                if "✅ Tarefa agendada criada" in reply:
-                    await increment_stat(sender, "scheduled_tasks_created")
-                await send_message(sender, reply)
-                return
+        if intent == "SCHEDULED_TASK":
+            log.info(f"Scheduled task intent for {sender}")
+            reply = await handle_scheduled_task(sender, text, scheduler)
+            if "✅ Tarefa agendada criada" in reply:
+                await increment_stat(sender, "scheduled_tasks_created")
+            await send_message(sender, reply)
+            return
 
-            # 8b. Reminder intent (only when not a capability/self question)
-            if is_reminder_intent(text):
-                log.info(f"Reminder intent detected for {sender}")
-                reply = await handle_reminder(sender, text, scheduler)
-                if "✅ Lembrete criado" in reply:
-                    await increment_stat(sender, "reminders_created")
-                await send_message(sender, reply)
-                return
+        if intent == "REMINDER":
+            log.info(f"Reminder intent for {sender}")
+            reply = await handle_reminder(sender, text, scheduler)
+            if "✅ Lembrete criado" in reply:
+                await increment_stat(sender, "reminders_created")
+            await send_message(sender, reply)
+            return
 
-        # 10. Chat (SELF / SIMPLE / COMPLEX)
+        # 9. Chat (SELF / SIMPLE / COMPLEX)
         if wants_new_session(text):
             await delete_session(sender)
             log.info(f"Session reset requested by {sender}")
 
         prev_id = await get_response_id(sender)
         result = await chat(
-            text, previous_response_id=prev_id, phone=sender, complexity=complexity,
+            text, previous_response_id=prev_id, phone=sender, complexity=intent,
         )
 
         if result.response_id:

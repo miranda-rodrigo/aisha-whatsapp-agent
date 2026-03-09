@@ -33,35 +33,42 @@ Você é Aisha, uma assistente pessoal inteligente e amigável. \
 Responda de forma objetiva e útil. Use o idioma do usuário."""
 
 _CLASSIFIER_PROMPT = """\
-Classify the user message as SIMPLE, COMPLEX, or SELF.
+Classify the user message into exactly one category.
+
+SCHEDULED_TASK: the user wants to create, list, edit, cancel, or modify a \
+recurring scheduled task (tarefa agendada). These are automated reports or \
+actions that run on a schedule (daily, weekly, etc.).
+Examples: "toda segunda me mande um relatório", "quero editar a tarefa", \
+"modifique a tarefa dos versículos", "quais são minhas tarefas agendadas?", \
+"cancela a tarefa agendada 1", "muda a tarefa agendada para todo dia às 10h".
+
+REMINDER: the user wants to create, list, edit, cancel, or modify a reminder \
+(lembrete). Reminders are one-time or recurring alerts about events/appointments.
+Examples: "me lembra da reunião amanhã às 10h", "quais são meus lembretes?", \
+"cancela o lembrete 2", "muda o lembrete 1 para as 11h", "me avisa às 18h", \
+"todo dia às 7h me lembra de tomar remédio".
+
+SELF: questions about Aisha herself — what she can do, her skills or abilities, \
+how to use a feature, her limitations, who she is, how she works. Only \
+informational questions about capabilities, not operational requests.
+Examples: "o que você faz?", "como funciona a transcrição?", "você pode criar \
+lembretes?", "quais são suas funções?", "me explica como usar".
 
 SIMPLE: casual chat, greetings, short direct questions, small talk, \
-confirmations, reactions (e.g. "oi", "blz?", "como vai?", "obrigado", \
-"que legal", "tudo bem?", "o que é X?", "me conta uma piada").
+confirmations, reactions.
+Examples: "oi", "obrigado", "tudo bem?", "o que é X?", "me conta uma piada".
 
 COMPLEX: requires web search, image generation, multi-step reasoning, \
 calculations, writing/editing long texts, research, technical questions, \
 code, planning, or anything that benefits from a more capable model.
 
-SELF: questions about Aisha herself — what she can do, her skills or abilities, \
-how to use a feature, her limitations, who she is, how she works. \
-This includes questions like "o que você faz?", "você consegue X?", \
-"como funciona a transcrição?", "quais são seus skills?", "quem é você?", \
-"como envio um documento?", "você pode criar lembretes?", \
-"você analisa vídeos do YouTube?", "posso modificar um lembrete?", \
-"como edito um lembrete?", "dá pra mudar o horário?", \
-"como cancelo?", "você faz lembretes recorrentes?", \
-"como funciona o lembrete?", "quais são as funções?", \
-"o que mais você sabe fazer?", "me explica como usar".
+Important distinctions:
+- "posso modificar um lembrete?" (asking about capability) → SELF
+- "modifica o lembrete 1 para 11h" (operational request) → REMINDER
+- "como funciona a tarefa agendada?" (asking about capability) → SELF
+- "edita a tarefa dos versículos para incluir contexto" (operational request) → SCHEDULED_TASK
 
-Important distinction:
-- Questions about capability or instructions are SELF.
-- Actual operational requests to create, list, edit, cancel, or modify reminders \
-  or scheduled tasks are NOT SELF.
-- Examples that are NOT SELF: "modifique a tarefa agendada 1", \
-  "muda o lembrete 2 para 11h", "quais são minhas tarefas agendadas?".
-
-Reply with exactly one word: SIMPLE, COMPLEX, or SELF."""
+Reply with exactly one word: SCHEDULED_TASK, REMINDER, SELF, SIMPLE, or COMPLEX."""
 
 _NEW_SESSION_PATTERNS = [
     r"\bnova conversa\b",
@@ -147,8 +154,11 @@ def wants_new_session(text: str) -> bool:
     return False
 
 
+_VALID_LABELS = {"SCHEDULED_TASK", "REMINDER", "SELF", "SIMPLE", "COMPLEX"}
+
+
 async def classify(user_input: str) -> str:
-    """Return 'SIMPLE', 'COMPLEX', or 'SELF' using Gemini Flash Lite as a cheap classifier."""
+    """Classify intent using Gemini Flash Lite. Returns one of the _VALID_LABELS."""
     response = await _get_gemini_client().aio.models.generate_content(
         model=_GEMINI_CLASSIFIER_MODEL,
         contents=user_input,
@@ -158,10 +168,11 @@ async def classify(user_input: str) -> str:
             temperature=0,
         ),
     )
-    label = response.text.strip().upper()
-    if label.startswith("SELF"):
-        return "SELF"
-    return "SIMPLE" if label.startswith("SIMPLE") else "COMPLEX"
+    label = response.text.strip().upper().replace("-", "_")
+    for valid in _VALID_LABELS:
+        if label.startswith(valid):
+            return valid
+    return "COMPLEX"
 
 
 _WEEKDAYS = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"]

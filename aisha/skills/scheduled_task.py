@@ -46,7 +46,7 @@ _TASK_PATTERNS = [
     r"\b(agenda|schedul)\w*\b.*\b(task|tarefa|ação)\b",
     r"\bcancela.{0,20}(tarefa|task)\s*(agendad|programad|recorrent)\w*\b",
     r"\b(lista|quais).{0,20}(tarefas|tasks)\s*(agendad|programad|recorrent)\w*\b",
-    r"\b(edita|edite|modifica|modifique|altera|altere|troca|troque|muda|mude)\b.{0,40}\b(tarefa|task)\b",
+    r"\b(edita[r]?|edite|modifica[r]?|modifique|altera[r]?|altere|troca[r]?|troque|muda[r]?|mude)\b.{0,40}\b(tarefa|task)\b",
 ]
 
 
