@@ -11,7 +11,8 @@ export const metadata: Metadata = {
   description: 'A assistente de IA mais completa para WhatsApp. Transcreva áudios, gere imagens, crie lembretes, analise documentos e muito mais.',
   icons: {
     icon: '/logo.png',
-    apple: '/logo.png',
+    apple: '/apple-icon.png',
+    shortcut: '/logo.png',
   },
 }
 
