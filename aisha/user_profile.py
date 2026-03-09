@@ -26,12 +26,27 @@ async def get_profile(phone: str) -> dict | None:
             headers=_HEADERS,
             params={
                 "phone": f"eq.{phone}",
-                "select": "personal_context,language,stats,updated_at",
+                "select": "personal_context,language,timezone,stats,updated_at",
             },
         )
         resp.raise_for_status()
         rows = resp.json()
     return rows[0] if rows else None
+
+
+async def upsert_timezone(phone: str, tz: str) -> None:
+    """Save or update the user's timezone (IANA name, e.g. 'America/Sao_Paulo')."""
+    async with httpx.AsyncClient() as client:
+        await client.post(
+            _TABLE_URL,
+            headers={**_HEADERS, "Prefer": "resolution=merge-duplicates"},
+            json={
+                "phone": phone,
+                "timezone": tz,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+    log.info(f"Timezone set for {phone}: {tz}")
 
 
 async def upsert_context(phone: str, context: str) -> None:

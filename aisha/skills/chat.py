@@ -169,9 +169,9 @@ _WEEKDAYS = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "s
 _MONTHS = ["", "janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"]
 
 
-def _now_str() -> str:
+def _now_str(user_tz: str) -> str:
     """Current datetime formatted in Portuguese, locale-independent."""
-    now = datetime.now(zoneinfo.ZoneInfo(USER_TIMEZONE))
+    now = datetime.now(zoneinfo.ZoneInfo(user_tz))
     wd = _WEEKDAYS[now.weekday()]
     month = _MONTHS[now.month]
     return f"{wd}, {now.day} de {month} de {now.year}, {now.strftime('%H:%M')}"
@@ -179,9 +179,10 @@ def _now_str() -> str:
 
 def _build_instructions(base: str, profile: dict | None) -> str:
     """Append current datetime and user profile context to base instructions."""
+    user_tz = (profile or {}).get("timezone") or USER_TIMEZONE
     parts = [
         base,
-        f"\nData/hora atual: {_now_str()} ({USER_TIMEZONE}).",
+        f"\nData/hora atual: {_now_str(user_tz)} ({user_tz}).",
     ]
     if profile:
         if profile.get("personal_context"):

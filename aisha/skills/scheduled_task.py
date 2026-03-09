@@ -64,10 +64,10 @@ class TaskExtraction(BaseModel):
     new_cron_readable: str | None = Field(None, description="Updated human-readable schedule when editing")
 
 
-def _build_extract_system() -> str:
+def _build_extract_system(user_tz: str) -> str:
     return f"""\
 You extract scheduled task actions from user messages.
-Current timezone: {USER_TIMEZONE}.
+Current timezone: {user_tz}.
 
 For 'create': extract:
 - name: a short descriptive name (max 50 chars) for the task
@@ -128,12 +128,12 @@ def is_scheduled_task_intent(text: str) -> bool:
     return False
 
 
-async def _extract(text: str) -> TaskExtraction:
+async def _extract(text: str, user_tz: str) -> TaskExtraction:
     """Call gpt-4o-mini with structured output to extract task intent."""
     response = await _client.beta.chat.completions.parse(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": _build_extract_system()},
+            {"role": "system", "content": _build_extract_system(user_tz)},
             {"role": "user", "content": text},
         ],
         response_format=TaskExtraction,
@@ -142,7 +142,7 @@ async def _extract(text: str) -> TaskExtraction:
     return response.choices[0].message.parsed
 
 
-def _parse_cron(expression: str) -> CronTrigger:
+def _parse_cron(expression: str, user_tz: str) -> CronTrigger:
     """Parse a 5-field cron expression into an APScheduler CronTrigger."""
     parts = expression.strip().split()
     if len(parts) != 5:
@@ -153,7 +153,7 @@ def _parse_cron(expression: str) -> CronTrigger:
         day=parts[2],
         month=parts[3],
         day_of_week=parts[4],
-        timezone=USER_TIMEZONE,
+        timezone=user_tz,
     )
 
 
@@ -266,9 +266,10 @@ async def _schedule_job(
     prompt: str,
     cron_expression: str,
     scheduler: AsyncScheduler,
+    user_tz: str,
 ) -> str:
     """Schedule the task job and return the APScheduler schedule_id."""
-    trigger = _parse_cron(cron_expression)
+    trigger = _parse_cron(cron_expression, user_tz)
 
     schedule_id = await scheduler.add_schedule(
         _execute_task,
@@ -285,9 +286,9 @@ async def _schedule_job(
     return str(schedule_id)
 
 
-async def handle_scheduled_task(phone: str, text: str, scheduler: AsyncScheduler) -> str:
+async def handle_scheduled_task(phone: str, text: str, scheduler: AsyncScheduler, user_tz: str) -> str:
     """Main entry point: parse, act, and return a reply message."""
-    extraction = await _extract(text)
+    extraction = await _extract(text, user_tz)
     action = extraction.action
 
     if action == "list":
@@ -297,13 +298,13 @@ async def handle_scheduled_task(phone: str, text: str, scheduler: AsyncScheduler
         return await _handle_cancel(phone, extraction, scheduler)
 
     if action == "edit":
-        return await _handle_edit(phone, extraction, scheduler)
+        return await _handle_edit(phone, extraction, scheduler, user_tz)
 
-    return await _handle_create(phone, extraction, scheduler)
+    return await _handle_create(phone, extraction, scheduler, user_tz)
 
 
 async def _handle_create(
-    phone: str, ex: TaskExtraction, scheduler: AsyncScheduler
+    phone: str, ex: TaskExtraction, scheduler: AsyncScheduler, user_tz: str
 ) -> str:
     if not ex.cron_expression or not ex.prompt:
         return (
@@ -314,7 +315,7 @@ async def _handle_create(
 
     name = ex.name or "Tarefa agendada"
     try:
-        _parse_cron(ex.cron_expression)
+        _parse_cron(ex.cron_expression, user_tz)
     except ValueError:
         return f"Não consegui interpretar o agendamento '{ex.cron_readable}'. Tente ser mais específico."
 
@@ -323,7 +324,7 @@ async def _handle_create(
         name=name,
         prompt=ex.prompt,
         cron_expression=ex.cron_expression,
-        timezone=USER_TIMEZONE,
+        timezone=user_tz,
     )
 
     task_id = await save_task(task)
@@ -335,6 +336,7 @@ async def _handle_create(
         prompt=ex.prompt,
         cron_expression=ex.cron_expression,
         scheduler=scheduler,
+        user_tz=user_tz,
     )
     await update_job_id(task_id, job_id)
 
@@ -394,7 +396,7 @@ async def _handle_cancel(
 
 
 async def _handle_edit(
-    phone: str, ex: TaskExtraction, scheduler: AsyncScheduler
+    phone: str, ex: TaskExtraction, scheduler: AsyncScheduler, user_tz: str
 ) -> str:
     rows = await get_tasks(phone)
     row, error = _resolve_task_reference(rows, ex)
@@ -405,6 +407,7 @@ async def _handle_edit(
     new_name = ex.new_name or row["name"]
     new_prompt = ex.new_prompt or row["prompt"]
     new_cron_expression = ex.new_cron_expression or row["cron_expression"]
+    effective_tz = row.get("timezone") or user_tz
 
     changed_fields: dict[str, str] = {}
     if new_name != row["name"]:
@@ -413,7 +416,7 @@ async def _handle_edit(
         changed_fields["prompt"] = new_prompt
     if new_cron_expression != row["cron_expression"]:
         try:
-            _parse_cron(new_cron_expression)
+            _parse_cron(new_cron_expression, effective_tz)
         except ValueError:
             schedule_label = ex.new_cron_readable or new_cron_expression
             return f"Não consegui interpretar o novo agendamento '{schedule_label}'. Tente ser mais específico."
@@ -442,6 +445,7 @@ async def _handle_edit(
         prompt=new_prompt,
         cron_expression=new_cron_expression,
         scheduler=scheduler,
+        user_tz=effective_tz,
     )
     await update_job_id(row["id"], job_id)
 
@@ -470,6 +474,7 @@ async def restore_scheduled_jobs(scheduler: AsyncScheduler) -> int:
                 prompt=task["prompt"],
                 cron_expression=task["cron_expression"],
                 scheduler=scheduler,
+                user_tz=task.get("timezone") or USER_TIMEZONE,
             )
             if task.get("job_id") != job_id:
                 await update_job_id(task["id"], job_id)

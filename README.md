@@ -299,11 +299,15 @@ CREATE TABLE user_profiles (
     phone            TEXT PRIMARY KEY,
     personal_context TEXT,
     language         TEXT DEFAULT 'pt-BR',
+    timezone         TEXT,
     stats            JSONB DEFAULT '{}'::jsonb,
     updated_at       TIMESTAMPTZ DEFAULT NOW()
 );
 
 ALTER TABLE user_profiles DISABLE ROW LEVEL SECURITY;
+
+-- Migração: adicionar coluna timezone (executar se a tabela já existir)
+-- ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS timezone TEXT;
 
 -- Tabela de tarefas agendadas
 CREATE TABLE scheduled_tasks (
@@ -388,7 +392,55 @@ Configure a URL gerada (`https://xxxx.ngrok.io/webhook`) no painel da Meta.
 4. A URL de produção será algo como: `https://seu-projeto.up.railway.app`
 5. Configure essa URL como webhook no Meta for Developers
 
-### 6. Configurar webhook na Meta
+### 6. Logs e Monitoramento (Railway)
+
+O Railway CLI é a forma mais prática de acessar logs de produção diretamente do terminal.
+
+**Instalação e autenticação (primeira vez):**
+```bash
+npm install -g @railway/cli
+railway login        # abre o browser para autenticar
+```
+
+**Linkar o projeto ao repositório local:**
+```bash
+# Na raiz do projeto
+railway link         # seleciona workspace → Aisha-agent → production
+```
+
+Isso grava as IDs de projeto/ambiente em `~/.railway/config.json`. Só precisa fazer uma vez.
+
+**Ver logs em tempo real:**
+```bash
+railway logs --service whatsapp-agent
+```
+
+**Buscar logs da última hora via API (útil para debug):**
+
+O CLI não aceita filtro por tempo, mas a API GraphQL do Railway aceita. O script abaixo extrai os logs da última hora e separa erros de linhas normais:
+
+```bash
+TOKEN=$(python3 -c "import json; d=json.load(open('$HOME/.railway/config.json')); print(d['user']['token'])")
+ENV_ID=$(python3 -c "import json; d=json.load(open('$HOME/.railway/config.json')); print(list(d['projects'].values())[0]['environment'])")
+START=$(python3 -c "from datetime import datetime,timezone,timedelta; print((datetime.now(timezone.utc)-timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+
+curl -s -X POST https://backboard.railway.com/graphql/v2 \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"query\": \"{ environmentLogs(environmentId: \\\"$ENV_ID\\\", afterDate: \\\"$START\\\", afterLimit: 500) { timestamp severity message } }\"}" \
+| python3 -c "
+import json, sys
+logs = json.load(sys.stdin)['data']['environmentLogs']
+errors = [l for l in logs if l['severity'].lower() in ('error','critical','fatal','warning')]
+print(f'Total: {len(logs)} linhas | Erros/Warnings: {len(errors)}')
+for l in errors:
+    print(l['timestamp'][:19], f'[{l[\"severity\"]}]', l['message'])
+"
+```
+
+> **Observação:** As IDs de projeto ficam gravadas após o `railway link`. Se trocar de máquina, repita o link. O `service` no config fica `null` — passe sempre `--service whatsapp-agent` no CLI.
+
+### 7. Configurar webhook na Meta
 
 No painel de developers.facebook.com:
 - URL do webhook: `https://seu-dominio/webhook`

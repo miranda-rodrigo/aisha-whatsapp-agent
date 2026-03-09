@@ -48,8 +48,9 @@ from aisha.skills.raw_transcription_state import (
 from aisha.skills.reminder import handle_reminder
 from aisha.skills.scheduled_task import handle_scheduled_task, restore_scheduled_jobs
 from aisha.session import delete_session, get_response_id, upsert_session
+from aisha.skills.timezone_inference import infer_timezone
 from aisha.skills.transcribe import transcribe_audio_bytes
-from aisha.user_profile import increment_stat
+from aisha.user_profile import get_profile, increment_stat, upsert_timezone
 from aisha.skills.youtube import (
     analyze_video,
     clear_pending_video,
@@ -288,6 +289,74 @@ def _is_download_intent(text: str) -> bool:
     return bool(_DOWNLOAD_KEYWORDS.search(text))
 
 
+# phone -> original reminder text awaiting timezone confirmation
+_pending_timezone: dict[str, str] = {}
+
+_TZ_RESOLVE_SYSTEM = """\
+Extract the IANA timezone identifier from a city or country name.
+Return ONLY the IANA timezone string (e.g. "America/Sao_Paulo", "Europe/Lisbon").
+If you cannot determine it, return the string "unknown".
+Do not include any explanation."""
+
+
+async def _resolve_tz_from_text(text: str) -> str | None:
+    """Ask the LLM to resolve a city/country name to an IANA timezone. Returns None if unresolvable."""
+    from openai import AsyncOpenAI
+    from aisha.config import OPENAI_API_KEY
+    client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+    resp = await client.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[
+            {"role": "system", "content": _TZ_RESOLVE_SYSTEM},
+            {"role": "user", "content": text},
+        ],
+        temperature=0,
+        max_tokens=30,
+    )
+    result = resp.choices[0].message.content.strip()
+    return None if result.lower() == "unknown" else result
+
+
+async def get_or_ask_timezone(
+    sender: str, reminder_text: str
+) -> str | None:
+    """Return the user's timezone if known, otherwise ask and return None.
+
+    Lookup order:
+    1. Supabase profile (already confirmed/saved)
+    2. Infer from phone number DDD/DDI (saves automatically if confident)
+    3. Ask the user — stores reminder_text in _pending_timezone so we can retry after answer
+    """
+    from aisha.config import USER_TIMEZONE
+
+    profile = await get_profile(sender)
+    if profile and profile.get("timezone"):
+        return profile["timezone"]
+
+    inferred = infer_timezone(sender)
+    if inferred:
+        await upsert_timezone(sender, inferred)
+        log.info(f"Timezone inferred for {sender}: {inferred}")
+        return inferred
+
+    # Cannot determine — ask the user and park the reminder text
+    _pending_timezone[sender] = reminder_text
+    return None
+
+
+def _tz_question_message(inferred: str | None = None) -> str:
+    if inferred:
+        return (
+            f"📍 Para criar lembretes com o horário certo, preciso saber onde você está.\n\n"
+            f"Detectei que você pode estar em *{inferred}* — está correto?\n"
+            f"Se sim, diga \"sim\". Se não, me diga sua cidade ou país."
+        )
+    return (
+        "📍 Para criar lembretes com o horário certo, preciso saber onde você está.\n\n"
+        "Me diz sua cidade ou país (ex: \"São Paulo\", \"Lisboa\", \"New York\")."
+    )
+
+
 def _contains_aisha(text: str) -> bool:
     return bool(re.search(r"\baisha\b", text, re.IGNORECASE))
 
@@ -311,7 +380,34 @@ def _is_retroactive_transcription_request(text: str) -> bool:
 async def handle_chat(sender: str, text: str):
     """Routes a text message through Aisha chat (or reminder/youtube skill) and sends the response."""
     try:
-        # 0. Retroactive transcription request ("eu só queria a transcrição mesmo")
+        # 0a. Pending timezone confirmation — user is answering "where are you?"
+        if sender in _pending_timezone:
+            original_text = _pending_timezone.pop(sender)
+            tz = await _resolve_tz_from_text(text)
+            if tz:
+                await upsert_timezone(sender, tz)
+                log.info(f"Timezone confirmed for {sender}: {tz}")
+                # Re-route the original request now that we have the timezone
+                original_intent = await classify(original_text)
+                if original_intent == "SCHEDULED_TASK":
+                    reply = await handle_scheduled_task(sender, original_text, scheduler, tz)
+                    if "✅ Tarefa agendada criada" in reply:
+                        await increment_stat(sender, "scheduled_tasks_created")
+                else:
+                    reply = await handle_reminder(sender, original_text, scheduler, tz)
+                    if "✅ Lembrete criado" in reply:
+                        await increment_stat(sender, "reminders_created")
+                await send_message(sender, reply)
+            else:
+                await send_message(
+                    sender,
+                    "Não consegui identificar o fuso horário. "
+                    "Pode me dizer sua cidade ou país? Ex: \"São Paulo\", \"Lisboa\", \"New York\"."
+                )
+                _pending_timezone[sender] = original_text  # put it back to retry
+            return
+
+        # 0b. Retroactive transcription request ("eu só queria a transcrição mesmo")
         if _is_retroactive_transcription_request(text):
             raw = pop_raw_transcription(sender)
             if raw:
@@ -484,7 +580,11 @@ async def handle_chat(sender: str, text: str):
 
         if intent == "SCHEDULED_TASK":
             log.info(f"Scheduled task intent for {sender}")
-            reply = await handle_scheduled_task(sender, text, scheduler)
+            task_tz = await get_or_ask_timezone(sender, text)
+            if task_tz is None:
+                await send_message(sender, _tz_question_message())
+                return
+            reply = await handle_scheduled_task(sender, text, scheduler, task_tz)
             if "✅ Tarefa agendada criada" in reply:
                 await increment_stat(sender, "scheduled_tasks_created")
             await send_message(sender, reply)
@@ -492,7 +592,11 @@ async def handle_chat(sender: str, text: str):
 
         if intent == "REMINDER":
             log.info(f"Reminder intent for {sender}")
-            reply = await handle_reminder(sender, text, scheduler)
+            user_tz = await get_or_ask_timezone(sender, text)
+            if user_tz is None:
+                await send_message(sender, _tz_question_message())
+                return
+            reply = await handle_reminder(sender, text, scheduler, user_tz)
             if "✅ Lembrete criado" in reply:
                 await increment_stat(sender, "reminders_created")
             await send_message(sender, reply)
