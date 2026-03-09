@@ -165,6 +165,42 @@ async def classify(user_input: str) -> str:
     return "COMPLEX"
 
 
+_PENDING_CLASSIFIER_PROMPT = """\
+The assistant previously asked the user a follow-up question about a pending action.
+Pending action: {pending_description}
+
+Now the user sent a new message. Classify it:
+
+CONTINUE: the message is a direct response, instruction, or answer related to the pending action.
+CANCEL: the user wants to dismiss, cancel, or ignore the pending action \
+(e.g. "deixa pra lá", "esquece", "nada", "não quero mais", "foi engano", "cancela").
+NEW_INTENT: the message is about something completely unrelated to the pending action \
+(e.g. a new question, a joke, a reminder request, chatting about another topic).
+
+Reply with exactly one word: CONTINUE, CANCEL, or NEW_INTENT."""
+
+_VALID_PENDING_LABELS = {"CONTINUE", "CANCEL", "NEW_INTENT"}
+
+
+async def classify_pending_response(user_input: str, pending_description: str) -> str:
+    """Classify user message against an active pending state. Returns CONTINUE, CANCEL, or NEW_INTENT."""
+    prompt = _PENDING_CLASSIFIER_PROMPT.format(pending_description=pending_description)
+    response = await _client.chat.completions.create(
+        model=_CLASSIFIER_MODEL,
+        messages=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": user_input},
+        ],
+        max_tokens=5,
+        temperature=0,
+    )
+    label = response.choices[0].message.content.strip().upper().replace("-", "_")
+    for valid in _VALID_PENDING_LABELS:
+        if label.startswith(valid):
+            return valid
+    return "CONTINUE"
+
+
 _WEEKDAYS = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"]
 _MONTHS = ["", "janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"]
 

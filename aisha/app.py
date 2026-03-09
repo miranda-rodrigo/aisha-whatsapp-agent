@@ -15,7 +15,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from aisha.skills.chat import chat, chat_with_document, chat_with_image, chat_with_webpage, classify, wants_new_session
+from aisha.skills.chat import chat, chat_with_document, chat_with_image, chat_with_webpage, classify, classify_pending_response, wants_new_session
 from aisha.config import (
     ALLOWED_NUMBERS,
     BASE_URL,
@@ -377,125 +377,158 @@ def _is_retroactive_transcription_request(text: str) -> bool:
     return bool(_WANTS_TRANSCRIPTION_RE.search(text))
 
 
+def _get_pending_description(sender: str) -> str | None:
+    """Return a human-readable description of the active pending state, or None."""
+    if sender in _pending_timezone:
+        return "Aguardando o fuso horário do usuário (cidade ou país)"
+    if get_pending_document(sender):
+        return "Aguardando seleção de páginas do PDF escaneado"
+    if get_pending_image(sender):
+        return "Aguardando instrução sobre a imagem enviada"
+    pending_yt = get_pending_video(sender)
+    if pending_yt:
+        return f"Aguardando instrução sobre o vídeo do YouTube: {pending_yt.url}"
+    pending_page = get_pending_page(sender)
+    if pending_page:
+        return f"Aguardando instrução sobre a página web: {pending_page.url}"
+    return None
+
+
+def _clear_all_pendings(sender: str) -> None:
+    """Remove every pending state for a sender."""
+    _pending_timezone.pop(sender, None)
+    clear_pending_image(sender)
+    clear_pending_video(sender)
+    clear_pending_page(sender)
+    clear_pending_document(sender)
+
+
+async def _execute_pending(sender: str, text: str) -> bool:
+    """Execute the active pending action with the user's reply. Returns True if handled."""
+    # Timezone confirmation
+    if sender in _pending_timezone:
+        original_text = _pending_timezone.pop(sender)
+        tz = await _resolve_tz_from_text(text)
+        if tz:
+            await upsert_timezone(sender, tz)
+            log.info(f"Timezone confirmed for {sender}: {tz}")
+            original_intent = await classify(original_text)
+            if original_intent == "SCHEDULED_TASK":
+                reply = await handle_scheduled_task(sender, original_text, scheduler, tz)
+                if "✅ Tarefa agendada criada" in reply:
+                    await increment_stat(sender, "scheduled_tasks_created")
+            else:
+                reply = await handle_reminder(sender, original_text, scheduler, tz)
+                if "✅ Lembrete criado" in reply:
+                    await increment_stat(sender, "reminders_created")
+            await send_message(sender, reply)
+        else:
+            await send_message(
+                sender,
+                "Não consegui identificar o fuso horário. "
+                "Pode me dizer sua cidade ou país? Ex: \"São Paulo\", \"Lisboa\", \"New York\"."
+            )
+            _pending_timezone[sender] = original_text
+        return True
+
+    # Scanned document — page selection
+    pending_doc = get_pending_document(sender)
+    if pending_doc:
+        log.info(f"Pending scanned PDF for {sender} — parsing page selection: {text[:60]}")
+        await _process_document_pages(sender, text, pending_doc)
+        return True
+
+    # Image instruction
+    pending_img = get_pending_image(sender)
+    if pending_img:
+        log.info(f"Pending image for {sender} — using text as instruction")
+        await _process_image_instruction(sender, text, pending_img)
+        return True
+
+    # YouTube video instruction
+    pending_yt = get_pending_video(sender)
+    if pending_yt:
+        log.info(f"Pending YouTube for {sender} — instruction: {text[:60]}")
+        clear_pending_video(sender)
+        if _is_download_intent(text):
+            await send_message(sender, "⏳ Baixando vídeo...")
+            try:
+                token, filename = await download_video(pending_yt.url)
+                link = f"{BASE_URL}/download/{token}"
+                await send_message(
+                    sender,
+                    f"✅ *{filename}*\n\n"
+                    f"🔗 Link de download (expira em 30 min):\n{link}",
+                )
+                await increment_stat(sender, "video_downloads")
+            except Exception as exc:
+                log.exception("Video download failed")
+                await send_message(sender, f"Não consegui baixar o vídeo: {exc}")
+        else:
+            await send_message(sender, "⏳ Analisando vídeo...")
+            await increment_stat(sender, "youtube")
+            reply = await analyze_video(pending_yt.url, text)
+            await send_message(sender, reply)
+        return True
+
+    # Webpage instruction
+    pending_page = get_pending_page(sender)
+    if pending_page:
+        log.info(f"Pending webpage for {sender} — processing with instruction: {text[:60]}")
+        clear_pending_page(sender)
+        await send_message(sender, "⏳ Lendo página...")
+        await increment_stat(sender, "webpages")
+        try:
+            content = await fetch_page(pending_page.url)
+            prev_id = await get_response_id(sender)
+            result = await chat_with_webpage(content, pending_page.url, text, prev_id)
+            if result.response_id:
+                await upsert_session(sender, result.response_id)
+            if result.text:
+                await send_message(sender, result.text)
+        except Exception as e:
+            log.exception("Webpage processing failed")
+            await send_message(sender, f"Não consegui acessar a página: {e}")
+        return True
+
+    return False
+
+
 async def handle_chat(sender: str, text: str):
     """Routes a text message through Aisha chat (or reminder/youtube skill) and sends the response."""
     try:
-        # 0a. Pending timezone confirmation — user is answering "where are you?"
-        if sender in _pending_timezone:
-            original_text = _pending_timezone.pop(sender)
-            tz = await _resolve_tz_from_text(text)
-            if tz:
-                await upsert_timezone(sender, tz)
-                log.info(f"Timezone confirmed for {sender}: {tz}")
-                # Re-route the original request now that we have the timezone
-                original_intent = await classify(original_text)
-                if original_intent == "SCHEDULED_TASK":
-                    reply = await handle_scheduled_task(sender, original_text, scheduler, tz)
-                    if "✅ Tarefa agendada criada" in reply:
-                        await increment_stat(sender, "scheduled_tasks_created")
-                else:
-                    reply = await handle_reminder(sender, original_text, scheduler, tz)
-                    if "✅ Lembrete criado" in reply:
-                        await increment_stat(sender, "reminders_created")
-                await send_message(sender, reply)
-            else:
-                await send_message(
-                    sender,
-                    "Não consegui identificar o fuso horário. "
-                    "Pode me dizer sua cidade ou país? Ex: \"São Paulo\", \"Lisboa\", \"New York\"."
-                )
-                _pending_timezone[sender] = original_text  # put it back to retry
-            return
-
-        # 0b. Retroactive transcription request ("eu só queria a transcrição mesmo")
+        # 0. Retroactive transcription request ("eu só queria a transcrição mesmo")
         if _is_retroactive_transcription_request(text):
             raw = pop_raw_transcription(sender)
             if raw:
                 log.info(f"Retroactive transcription request for {sender} — refining stored raw text")
                 await _send_refined_transcription(sender, raw)
                 return
-            # No stored transcription — fall through to normal chat
 
-        # 1. Pending scanned document — user is selecting pages
-        pending_doc = get_pending_document(sender)
-        if pending_doc:
-            log.info(f"Pending scanned PDF for {sender} — parsing page selection: {text[:60]}")
-            await _process_document_pages(sender, text, pending_doc)
-            return
+        # 1. Pending state triage — classify user reply as CONTINUE / CANCEL / NEW_INTENT
+        pending_desc = _get_pending_description(sender)
+        if pending_desc:
+            decision = await classify_pending_response(text, pending_desc)
+            log.info(f"Pending triage for {sender}: {decision} (pending={pending_desc[:60]})")
 
-        # 2. Pending image instruction
-        pending_img = get_pending_image(sender)
-        if pending_img:
-            intent = await classify(text)
-            if intent in ("REMINDER", "SCHEDULED_TASK", "SELF"):
-                log.info(
-                    f"Pending image for {sender} ignored — message classified as {intent}: {text[:60]}"
+            if decision == "CANCEL":
+                _clear_all_pendings(sender)
+                await send_message(
+                    sender,
+                    "Sem problema! Pode ignorar a mensagem anterior.\n\n"
+                    "Se precisar de algo, é só falar.",
                 )
-            else:
-                log.info(f"Pending image found for {sender} — using text as instruction")
-                await _process_image_instruction(sender, text, pending_img)
                 return
 
-        # 3. Pending YouTube video — user is now sending the instruction
-        pending_yt = get_pending_video(sender)
-        if pending_yt:
-            intent = await classify(text)
-            if intent in ("REMINDER", "SCHEDULED_TASK", "SELF"):
-                # User is doing something unrelated — keep video pending and fall through
-                log.info(
-                    f"Pending YouTube for {sender} ignored — message classified as {intent}: {text[:60]}"
-                )
-            else:
-                log.info(f"Pending YouTube for {sender} — instruction: {text[:60]}")
-                clear_pending_video(sender)
-                if _is_download_intent(text):
-                    await send_message(sender, "⏳ Baixando vídeo...")
-                    try:
-                        token, filename = await download_video(pending_yt.url)
-                        link = f"{BASE_URL}/download/{token}"
-                        await send_message(
-                            sender,
-                            f"✅ *{filename}*\n\n"
-                            f"🔗 Link de download (expira em 30 min):\n{link}",
-                        )
-                        await increment_stat(sender, "video_downloads")
-                    except Exception as exc:
-                        log.exception("Video download failed")
-                        await send_message(sender, f"Não consegui baixar o vídeo: {exc}")
-                else:
-                    await send_message(sender, "⏳ Analisando vídeo...")
-                    await increment_stat(sender, "youtube")
-                    reply = await analyze_video(pending_yt.url, text)
-                    await send_message(sender, reply)
-                return
+            if decision == "NEW_INTENT":
+                _clear_all_pendings(sender)
+                # Fall through to normal flow below
 
-        # 4. Pending webpage — user is now sending the instruction
-        pending_page = get_pending_page(sender)
-        if pending_page:
-            intent = await classify(text)
-            if intent in ("REMINDER", "SCHEDULED_TASK", "SELF"):
-                log.info(
-                    f"Pending webpage for {sender} ignored — message classified as {intent}: {text[:60]}"
-                )
-            else:
-                log.info(f"Pending webpage for {sender} — processing with instruction: {text[:60]}")
-                clear_pending_page(sender)
-                await send_message(sender, "⏳ Lendo página...")
-                await increment_stat(sender, "webpages")
-                try:
-                    content = await fetch_page(pending_page.url)
-                    prev_id = await get_response_id(sender)
-                    result = await chat_with_webpage(content, pending_page.url, text, prev_id)
-                    if result.response_id:
-                        await upsert_session(sender, result.response_id)
-                    if result.text:
-                        await send_message(sender, result.text)
-                except Exception as e:
-                    log.exception("Webpage processing failed")
-                    await send_message(sender, f"Não consegui acessar a página: {e}")
-                return
+            elif decision == "CONTINUE":
+                if await _execute_pending(sender, text):
+                    return
 
-        # 5. Video download URL (YouTube or X/Twitter with "baixa"/"download" intent)
+        # 2. Video download URL (YouTube or X/Twitter with "baixa"/"download" intent in new message)
         video_url = extract_video_url(text)
         if video_url and _is_download_intent(text):
             log.info(f"Video download intent for {sender}: {video_url}")
@@ -514,7 +547,7 @@ async def handle_chat(sender: str, text: str):
                 await send_message(sender, f"Não consegui baixar o vídeo: {exc}")
             return
 
-        # 6. YouTube URL in current message
+        # 3. YouTube URL in current message
         yt_url = extract_youtube_url(text)
         if yt_url:
             instruction = strip_youtube_url(text)
@@ -540,7 +573,7 @@ async def handle_chat(sender: str, text: str):
                 )
             return
 
-        # 7. Web URL in current message
+        # 4. Web URL in current message
         web_url = extract_web_url(text)
         if web_url:
             instruction = strip_web_url(text)
@@ -574,7 +607,7 @@ async def handle_chat(sender: str, text: str):
                 )
             return
 
-        # 8. Classify intent (LLM) — single call routes to skill or chat
+        # 5. Classify intent (LLM) — single call routes to skill or chat
         intent = await classify(text)
         log.info(f"Classified as {intent}: {text[:80]}")
 
@@ -602,7 +635,7 @@ async def handle_chat(sender: str, text: str):
             await send_message(sender, reply)
             return
 
-        # 9. Chat (SELF / SIMPLE / COMPLEX)
+        # 6. Chat (SELF / SIMPLE / COMPLEX)
         if wants_new_session(text):
             await delete_session(sender)
             log.info(f"Session reset requested by {sender}")
