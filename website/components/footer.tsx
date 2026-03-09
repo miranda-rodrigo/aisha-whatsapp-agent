@@ -1,10 +1,12 @@
+import Image from "next/image"
+
 export function Footer() {
   return (
     <footer className="py-10 px-4 border-t border-border">
       <div className="max-w-7xl mx-auto flex flex-col gap-6">
         <div className="flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            <span className="text-2xl">🌙</span>
+            <Image src="/logo.png" alt="Aisha" width={32} height={32} className="rounded-full" />
             <span className="font-semibold text-foreground">Aisha</span>
           </div>
 

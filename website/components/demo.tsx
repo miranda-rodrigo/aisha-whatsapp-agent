@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { cn } from "@/lib/utils"
+import Image from "next/image"
 
 const demos = [
   {
@@ -116,8 +117,8 @@ export function Demo() {
           <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-2xl shadow-primary/5">
             {/* Chat header */}
             <div className="flex items-center gap-3 p-4 border-b border-border bg-secondary/50">
-              <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
-                <span className="text-xl">🌙</span>
+              <div className="w-10 h-10 rounded-full overflow-hidden">
+                <Image src="/logo.png" alt="Aisha" width={40} height={40} className="object-cover" />
               </div>
               <div>
                 <h3 className="font-semibold text-foreground">Aisha</h3>

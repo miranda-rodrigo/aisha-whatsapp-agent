@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button"
 import { MessageCircle, Menu, X } from "lucide-react"
 import { useState } from "react"
+import Image from "next/image"
 import { motion, AnimatePresence } from "framer-motion"
 import { cn } from "@/lib/utils"
 
@@ -20,7 +21,7 @@ export function Navbar() {
         <nav className="flex items-center justify-between h-16">
           {/* Logo */}
           <a href="#" className="flex items-center gap-2">
-            <span className="text-2xl">🌙</span>
+            <Image src="/logo.png" alt="Aisha" width={32} height={32} className="rounded-full" />
             <span className="font-bold text-xl text-foreground">Aisha</span>
           </a>
           

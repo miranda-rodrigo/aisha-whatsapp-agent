@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button"
 import { MessageCircle } from "lucide-react"
 import { motion } from "framer-motion"
+import Image from "next/image"
 
 export function CTA() {
   return (
@@ -19,8 +20,8 @@ export function CTA() {
           <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:32px_32px] opacity-50" />
           
           <div className="relative z-10">
-            <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-primary/20 text-primary mb-8">
-              <span className="text-4xl">🌙</span>
+            <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl overflow-hidden mb-8">
+              <Image src="/logo.png" alt="Aisha" width={80} height={80} className="object-cover" />
             </div>
             
             <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold text-foreground mb-4 text-balance">

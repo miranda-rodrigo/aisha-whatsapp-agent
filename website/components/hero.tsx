@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button"
 import { MessageCircle, ArrowRight, Sparkles } from "lucide-react"
 import { motion } from "framer-motion"
+import Image from "next/image"
 
 export function Hero() {
   return (
@@ -75,8 +76,8 @@ export function Hero() {
             {/* Chat preview */}
             <div className="rounded-2xl border border-border bg-card p-6 shadow-2xl shadow-primary/5">
               <div className="flex items-center gap-3 mb-6 pb-4 border-b border-border">
-                <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
-                  <span className="text-xl">🌙</span>
+                <div className="w-10 h-10 rounded-full overflow-hidden">
+                  <Image src="/logo.png" alt="Aisha" width={40} height={40} className="object-cover" />
                 </div>
                 <div>
                   <h3 className="font-semibold text-foreground">Aisha</h3>
