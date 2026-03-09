@@ -1,11 +1,17 @@
 """Refine raw transcriptions using an LLM."""
 
+import logging
+
 from google import genai
 from google.genai import types
+from google.genai.errors import ServerError
 
 from aisha.config import GEMINI_API_KEY
 
-_MODEL = "gemini-3.1-flash-lite-preview"
+log = logging.getLogger(__name__)
+
+_PRIMARY_MODEL = "gemini-2.5-flash"
+_FALLBACK_MODEL = "gemini-2.0-flash-lite"
 
 _SYSTEM_PROMPT = """\
 Atue como um editor de textos especializado em transcrições. \
@@ -37,9 +43,9 @@ def _get_client() -> genai.Client:
     return _client
 
 
-async def refine_transcription(raw_text: str) -> str:
+async def _generate(model: str, raw_text: str) -> str:
     response = await _get_client().aio.models.generate_content(
-        model=_MODEL,
+        model=model,
         contents=raw_text,
         config=types.GenerateContentConfig(
             system_instruction=_SYSTEM_PROMPT,
@@ -47,3 +53,13 @@ async def refine_transcription(raw_text: str) -> str:
         ),
     )
     return response.text.strip()
+
+
+async def refine_transcription(raw_text: str) -> str:
+    try:
+        return await _generate(_PRIMARY_MODEL, raw_text)
+    except ServerError as e:
+        if e.code == 503:
+            log.warning(f"Primary model {_PRIMARY_MODEL} unavailable (503), trying fallback {_FALLBACK_MODEL}")
+            return await _generate(_FALLBACK_MODEL, raw_text)
+        raise

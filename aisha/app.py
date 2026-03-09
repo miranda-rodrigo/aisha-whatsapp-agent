@@ -40,6 +40,11 @@ from aisha.skills.document_state import (
 )
 from aisha.skills.image_state import clear_pending_image, get_pending_image, store_pending_image
 from aisha.skills.refine import refine_transcription
+from aisha.skills.raw_transcription_state import (
+    get_raw_transcription,
+    pop_raw_transcription,
+    store_raw_transcription,
+)
 from aisha.skills.reminder import handle_reminder
 from aisha.skills.scheduled_task import handle_scheduled_task, restore_scheduled_jobs
 from aisha.session import delete_session, get_response_id, upsert_session
@@ -291,9 +296,30 @@ def _strip_aisha(text: str) -> str:
     return re.sub(r"\baisha\b[,\s]*", "", text, count=1, flags=re.IGNORECASE).strip()
 
 
+_WANTS_TRANSCRIPTION_RE = re.compile(
+    r"(só\s+quer(ia|o)|quero\s+só|só\s+precis(ava|o)|era\s+só|só\s+era|"
+    r"não\s+precis(a|o)\s+responder|s[oó]\s+a?\s*transcri[çc][aã]o|"
+    r"transcrev(e|a)\s+(isso|a[íi]|o\s+áudio)|manda\s+(a\s+)?transcri[çc][aã]o)",
+    re.IGNORECASE,
+)
+
+
+def _is_retroactive_transcription_request(text: str) -> bool:
+    return bool(_WANTS_TRANSCRIPTION_RE.search(text))
+
+
 async def handle_chat(sender: str, text: str):
     """Routes a text message through Aisha chat (or reminder/youtube skill) and sends the response."""
     try:
+        # 0. Retroactive transcription request ("eu só queria a transcrição mesmo")
+        if _is_retroactive_transcription_request(text):
+            raw = pop_raw_transcription(sender)
+            if raw:
+                log.info(f"Retroactive transcription request for {sender} — refining stored raw text")
+                await _send_refined_transcription(sender, raw)
+                return
+            # No stored transcription — fall through to normal chat
+
         # 1. Pending scanned document — user is selecting pages
         pending_doc = get_pending_document(sender)
         if pending_doc:
@@ -494,8 +520,32 @@ async def handle_chat(sender: str, text: str):
         await send_message(sender, f"Erro no chat: {e}")
 
 
+def _is_transcription_request(text: str) -> bool:
+    """Returns True if the raw transcription explicitly asks Aisha to transcribe."""
+    return bool(re.search(
+        r"\baisha\b.{0,40}\bTranscreva\b",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    ))
+
+
+async def _send_refined_transcription(sender: str, raw_text: str) -> None:
+    refined_text = await refine_transcription(raw_text)
+    log.info(f"Refined transcription: {len(refined_text)} chars")
+    await send_message(sender, "📝 Transcrição:")
+    await send_message(sender, refined_text)
+
+
 async def handle_audio(sender: str, message: dict):
-    """Downloads audio, transcribes it, and routes to chat or transcription."""
+    """Downloads audio, transcribes it, and routes to chat or transcription.
+
+    Routing rules:
+    1. Pending image → use audio as instruction (unchanged).
+    2. Explicit transcription request ("Aisha, transcreva...") → refine and return.
+    3. New session (no active context) AND no 'Aisha' keyword → user wants a transcript.
+    4. Active session AND no 'Aisha' keyword → route to chat (person is talking TO Aisha).
+    5. 'Aisha' keyword present but not a transcription request → strip name and chat.
+    """
     audio_id = message["audio"]["id"]
     log.info(f"Downloading audio {audio_id}")
 
@@ -516,26 +566,50 @@ async def handle_audio(sender: str, message: dict):
         raw_text = await transcribe_audio_bytes(audio_bytes, mime_type)
         log.info(f"Raw transcription: {len(raw_text)} chars")
 
+        # Rule 1: pending image — use audio as instruction
         pending = get_pending_image(sender)
         if pending:
             log.info(f"Pending image found for {sender} — using audio as instruction")
             await _process_image_instruction(sender, raw_text, pending)
             return
 
-        if _contains_aisha(raw_text):
-            log.info("Keyword 'Aisha' detected — routing to chat")
-            user_input = _strip_aisha(raw_text)
-            result = await chat(user_input, phone=sender)
-            if result.image_bytes:
-                await send_image(sender, result.image_bytes)
-            if result.text:
-                await send_message(sender, result.text)
-        else:
-            log.info("No keyword — routing to transcription refinement")
-            refined_text = await refine_transcription(raw_text)
-            log.info(f"Refined transcription: {len(refined_text)} chars")
-            await send_message(sender, "📝 Transcrição:")
-            await send_message(sender, refined_text)
+        # Rule 2: explicit transcription request ("Aisha, transcreva ...")
+        if _is_transcription_request(raw_text):
+            log.info("Explicit transcription request detected — refining")
+            user_text = re.sub(
+                r"\baisha\b.{0,40}\bTranscreva\b[,\s]*",
+                "",
+                raw_text,
+                count=1,
+                flags=re.IGNORECASE | re.DOTALL,
+            ).strip()
+            store_raw_transcription(sender, user_text)
+            await _send_refined_transcription(sender, user_text)
+            return
+
+        has_aisha = _contains_aisha(raw_text)
+
+        # Rule 3: new session AND no 'Aisha' → person wants a transcript
+        prev_id = await get_response_id(sender)
+        is_new_session = prev_id is None
+
+        if is_new_session and not has_aisha:
+            log.info("New session, no Aisha keyword — routing to transcription refinement")
+            store_raw_transcription(sender, raw_text)
+            await _send_refined_transcription(sender, raw_text)
+            return
+
+        # Rule 4 & 5: active session OR has 'Aisha' → chat
+        user_input = _strip_aisha(raw_text) if has_aisha else raw_text
+        log.info(f"Routing to chat (new_session={is_new_session}, has_aisha={has_aisha})")
+        store_raw_transcription(sender, raw_text)
+        result = await chat(user_input, previous_response_id=prev_id, phone=sender)
+        if result.response_id:
+            await upsert_session(sender, result.response_id)
+        if result.image_bytes:
+            await send_image(sender, result.image_bytes)
+        if result.text:
+            await send_message(sender, result.text)
     except Exception as e:
         log.exception("Audio processing failed")
         await send_message(sender, f"Erro ao processar áudio: {e}")

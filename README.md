@@ -26,11 +26,16 @@ Aisha é uma assistente pessoal inteligente que roda no WhatsApp Business API. E
 - Estatísticas rastreadas: áudios, imagens, documentos, vídeos YouTube, lembretes criados, tarefas agendadas criadas
 
 ### Transcrição de Áudio
-- Áudios enviados **sem** mencionar "Aisha" são transcritos com Whisper e refinados com GPT-4o-mini
+- Áudios transcritos com Whisper e refinados com Gemini 2.5 Flash (fallback: Gemini 2.0 Flash Lite)
 - O texto é devolvido limpo, sem vícios de linguagem ou hesitações
+- **Roteamento inteligente por contexto de sessão:**
+  - **Nova sessão + sem "Aisha"** → infere que a pessoa quer transcrever (ex: encaminhar áudio para alguém)
+  - **Sessão ativa + sem "Aisha"** → trata como instrução de voz para o chat
+  - **"Aisha, transcreva..."** → sempre transcreve, independente do contexto
+- **Correção retroativa:** se a Aisha respondeu quando a pessoa queria só a transcrição, basta dizer "eu só queria a transcrição" e ela refina o áudio original (guardado por 5 minutos)
 
 ### Chat por Áudio
-- Áudios que contêm a palavra **"Aisha"** são tratados como conversa
+- Áudios que contêm a palavra **"Aisha"** em sessão ativa são tratados como conversa
 - Exemplos: "Aisha, qual a previsão do tempo?" ou "Aisha, me explica o que é inflação"
 - O áudio é transcrito e o conteúdo é enviado para o modelo de chat
 
@@ -129,10 +134,11 @@ Mensagem WhatsApp
         │
         ├── Áudio ──► Whisper (transcrição)
         │                     │
-        │                     ├── imagem pendente? ──► Processa imagem com instrução
-        │                     ├── contém "Aisha" ───► Chat
-        │                     └── sem "Aisha" ──────► Refinamento (GPT-4o-mini)
-        │                                              └── devolve transcrição limpa
+        │                     ├── imagem pendente? ──────────────────► Processa imagem com instrução
+        │                     ├── "Aisha, transcreva ..." ───────────► Refinamento (Gemini 2.5 Flash)
+        │                     ├── nova sessão + sem "Aisha" ─────────► Refinamento (Gemini 2.5 Flash)
+        │                     └── sessão ativa (com ou sem "Aisha") ─► Chat
+        │                                    └── transcrição bruta guardada 5min p/ correção retroativa
         │
         ├── Imagem ──┬── com legenda ──► Processa imagem com legenda como instrução
         │            └── sem legenda ──► Armazena imagem + pergunta o que fazer
@@ -145,6 +151,7 @@ Mensagem WhatsApp
 
 handle_chat (texto)
         │
+        ├── 0. pedido retroativo de transcrição? ──► refina transcrição bruta guardada (5min TTL)
         ├── 1. imagem pendente? ──► Processa imagem com instrução
         ├── 2. YouTube pendente? ──► Gemini 2.5 Flash ──► análise
         ├── 3. webpage pendente? ──► Jina Reader + gpt-4.1 ──► processa
@@ -202,7 +209,8 @@ whatsapp-agent/
 │       ├── scheduled_task_store.py  # CRUD Supabase para tabela scheduled_tasks
 │       ├── document.py         # Processamento de PDF/DOCX
 │       ├── transcribe.py       # Transcrição de áudio via Whisper API + ffmpeg
-│       ├── refine.py           # Refinamento de transcrições via GPT-4o-mini
+│       ├── refine.py           # Refinamento de transcrições via Gemini 2.5 Flash (fallback: 2.0 Flash Lite)
+│       ├── raw_transcription_state.py  # Cache in-memory de transcrições brutas (TTL 5min)
 │       ├── youtube.py          # Análise de vídeos YouTube via Gemini 2.5 Flash
 │       ├── webpage.py          # Leitura de páginas web via Jina Reader
 │       └── image_state.py      # Estado em memória para imagens pendentes (TTL 5min)
@@ -228,7 +236,7 @@ whatsapp-agent/
 | LLM chat complexo | OpenAI gpt-5.4 via Responses API |
 | LLM auto-consciência | OpenAI gpt-4.1 via Responses API + skills.md |
 | LLM documentos | OpenAI gpt-4.1 via Responses API |
-| LLM refinamento | OpenAI gpt-4o-mini |
+| LLM refinamento | Google Gemini 2.5 Flash (fallback: Gemini 2.0 Flash Lite) |
 | Transcrição | OpenAI Whisper (whisper-1) |
 | Geração/edição de imagem | gpt-image-1.5 (via Responses API image_generation) |
 | Busca na web | Ferramenta nativa da Responses API |
@@ -413,7 +421,7 @@ No painel de developers.facebook.com:
 | OpenAI gpt-4.1 (chat simples + self + docs) | ~$0.001/msg |
 | OpenAI gpt-4.1 vision (OCR de PDFs escaneados) | ~$0.01–$0.05/doc (varia por nº de páginas) |
 | OpenAI gpt-5.4 (chat complexo) | ~$0.005-0.015/msg |
-| OpenAI GPT-4o-mini (refinamento de transcrição) | ~$0.001/msg |
+| Google Gemini 2.5 Flash (refinamento de transcrição) | ~$0.001/msg |
 | OpenAI gpt-image-1.5 (imagem) | ~$0.02-0.08/imagem |
 | OpenAI web_search (busca) | ~$0.001/chamada |
 | OpenAI gpt-5.4 (tarefa agendada com web search) | ~$0.01-0.02/execução |
