@@ -279,7 +279,7 @@ async def receive_webhook(request: Request):
 
 
 _DOWNLOAD_KEYWORDS = re.compile(
-    r"\b(baixa|baixar|download|salva|salvar|me manda|manda|pega)\b",
+    r"\b(baixa|baixe|baixar|download|salva|salve|salvar|me manda|manda|pega)\b",
     re.IGNORECASE,
 )
 

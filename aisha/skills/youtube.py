@@ -79,7 +79,7 @@ def clear_pending_video(phone: str) -> None:
 
 async def analyze_video(url: str, instruction: str) -> str:
     """Send the YouTube URL + instruction to Gemini and return the text response."""
-    from google.api_core.exceptions import PermissionDenied, InvalidArgument
+    from google.genai.errors import ClientError
 
     prompt = instruction.strip() if instruction.strip() else _DEFAULT_PROMPT
 
@@ -94,18 +94,20 @@ async def analyze_video(url: str, instruction: str) -> str:
             ],
         )
         return response.text
-    except PermissionDenied:
-        log.warning(f"Gemini 403 for {url} — live stream or restricted video")
-        return (
-            "Não consegui acessar esse vídeo. Isso geralmente acontece com:\n\n"
-            "• *Lives ao vivo* — só funciona após o vídeo ser publicado\n"
-            "• Vídeos com *restrição de idade* ou *região*\n"
-            "• Vídeos *privados* ou *não listados*\n\n"
-            "Tente novamente depois que a live terminar e o vídeo estiver disponível."
-        )
-    except InvalidArgument as e:
-        log.warning(f"Gemini InvalidArgument for {url}: {e}")
-        return (
-            "Não consegui processar esse vídeo. "
-            "Verifique se o link é válido e o vídeo está disponível publicamente."
-        )
+    except ClientError as e:
+        if e.code == 403:
+            log.warning(f"Gemini 403 for {url} — live stream or restricted video")
+            return (
+                "Não consegui acessar esse vídeo. Isso geralmente acontece com:\n\n"
+                "• *Lives ao vivo* — só funciona após o vídeo ser publicado\n"
+                "• Vídeos com *restrição de idade* ou *região*\n"
+                "• Vídeos *privados* ou *não listados*\n\n"
+                "Tente novamente depois que a live terminar e o vídeo estiver disponível."
+            )
+        if e.code == 400:
+            log.warning(f"Gemini 400 for {url}: {e}")
+            return (
+                "Não consegui processar esse vídeo. "
+                "Verifique se o link é válido e o vídeo está disponível publicamente."
+            )
+        raise
