@@ -1,4 +1,4 @@
-"""Scheduled task skill: create, list, cancel recurring agent actions.
+"""Scheduled task skill: create, list, edit and cancel recurring agent actions.
 
 Unlike reminders (which send a fixed text), scheduled tasks execute an
 agent prompt with web_search enabled and send the AI-generated result.
@@ -7,7 +7,9 @@ Example: "toda segunda me mande um relatório sobre notícias do Irã".
 
 import logging
 import re
+import unicodedata
 from datetime import timedelta
+from difflib import SequenceMatcher
 from typing import Literal
 
 import httpx
@@ -28,6 +30,7 @@ from aisha.skills.scheduled_task_store import (
     get_tasks,
     save_task,
     update_job_id,
+    update_task,
 )
 
 log = logging.getLogger(__name__)
@@ -43,16 +46,22 @@ _TASK_PATTERNS = [
     r"\b(agenda|schedul)\w*\b.*\b(task|tarefa|ação)\b",
     r"\bcancela.{0,20}(tarefa|task)\s*(agendad|programad|recorrent)\w*\b",
     r"\b(lista|quais).{0,20}(tarefas|tasks)\s*(agendad|programad|recorrent)\w*\b",
+    r"\b(edita|edite|modifica|modifique|altera|altere|troca|troque|muda|mude)\b.{0,40}\b(tarefa|task)\b",
 ]
 
 
 class TaskExtraction(BaseModel):
-    action: Literal["create", "list", "cancel"]
-    name: str | None = Field(None, description="Short name for the task, e.g. 'Relatório Irã'")
-    prompt: str | None = Field(None, description="The full prompt/instruction the agent should execute each time")
-    cron_expression: str | None = Field(None, description="Standard cron expression (5 fields: min hour dom month dow)")
-    cron_readable: str | None = Field(None, description="Human-readable schedule, e.g. 'toda segunda às 9h'")
-    task_number: int | None = Field(None, description="1-based index from list for cancel")
+    action: Literal["create", "list", "cancel", "edit"]
+    name: str | None = Field(None, description="Short name for the task when creating")
+    prompt: str | None = Field(None, description="Full prompt/instruction when creating")
+    cron_expression: str | None = Field(None, description="Cron expression when creating")
+    cron_readable: str | None = Field(None, description="Human-readable schedule when creating")
+    task_number: int | None = Field(None, description="1-based index from list for cancel/edit")
+    task_reference_text: str | None = Field(None, description="User text that identifies the task, e.g. 'dos versículos'")
+    new_name: str | None = Field(None, description="Updated short name when editing")
+    new_prompt: str | None = Field(None, description="Updated instruction/prompt when editing")
+    new_cron_expression: str | None = Field(None, description="Updated cron expression when editing")
+    new_cron_readable: str | None = Field(None, description="Updated human-readable schedule when editing")
 
 
 def _build_extract_system() -> str:
@@ -72,24 +81,42 @@ If user says "todo dia" without time, default to 08:00.
 
 For 'list': user wants to see their active scheduled tasks.
 For 'cancel': user wants to remove a scheduled task. Extract task_number if mentioned.
+For 'edit': user wants to change an existing scheduled task. Extract:
+- task_number when user mentions "tarefa 1"
+- task_reference_text when user refers to the task by topic/name, e.g. "dos versículos"
+- new_prompt when the requested change alters what should be sent
+- new_cron_expression and new_cron_readable when the user changes time/frequency
+- new_name only if the new task description clearly implies a better short name
+
+Important:
+- Requests like "modifique a tarefa agendada..." or "muda a tarefa dos versículos..."
+  are EDIT, not help/self-awareness.
+- When editing only the content, keep new_cron_expression null.
+- When editing only the schedule, keep new_prompt null.
 
 Examples:
 - "toda segunda me mande um relatório com as últimas notícias sobre o Irã"
-  → name="Relatório Irã", prompt="Pesquise as últimas notícias sobre o Irã da última semana. \
+  → action="create", name="Relatório Irã", prompt="Pesquise as últimas notícias sobre o Irã da última semana. \
 Faça um relatório conciso em português com os principais acontecimentos, organizado por tema.", \
 cron_expression="0 9 * * 1", cron_readable="toda segunda-feira às 09:00"
 
 - "todo dia às 7h me mande o resumo do mercado financeiro"
-  → name="Resumo mercado", prompt="Pesquise o estado atual do mercado financeiro: \
+  → action="create", name="Resumo mercado", prompt="Pesquise o estado atual do mercado financeiro: \
 principais índices (Ibovespa, S&P500, Nasdaq), câmbio (dólar, euro), e destaques do dia. \
 Resuma de forma objetiva em português.", \
 cron_expression="0 7 * * *", cron_readable="todo dia às 07:00"
 
 - "toda sexta às 18h pesquise as novidades de IA da semana e me mande um resumo"
-  → name="Novidades IA", prompt="Pesquise as principais novidades e lançamentos de \
+  → action="create", name="Novidades IA", prompt="Pesquise as principais novidades e lançamentos de \
 inteligência artificial da última semana. Inclua novos modelos, ferramentas, papers \
 relevantes e notícias do setor. Resuma em português de forma estruturada.", \
 cron_expression="0 18 * * 5", cron_readable="toda sexta-feira às 18:00"
+
+- "modifique a tarefa agendada dos versículos para incluir um pequeno texto sobre esses versículos"
+  → action="edit", task_reference_text="dos versículos", new_prompt="Acesse bibliaonline.com.br e colete os versículos do dia. Envie os versículos em português de forma clara e concisa. Inclua também um pequeno texto explicando ou refletindo sobre os versículos.", new_cron_expression=null
+
+- "muda a tarefa agendada 1 para todo dia às 10h"
+  → action="edit", task_number=1, new_cron_expression="0 10 * * *", new_cron_readable="todo dia às 10:00", new_prompt=null
 """
 
 
@@ -128,6 +155,59 @@ def _parse_cron(expression: str) -> CronTrigger:
         day_of_week=parts[4],
         timezone=USER_TIMEZONE,
     )
+
+
+def _normalize_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text.lower())
+    ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
+    cleaned = re.sub(r"[^a-z0-9\s]", " ", ascii_text)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _resolve_task_reference(rows: list[dict], ex: TaskExtraction) -> tuple[dict | None, str | None]:
+    if not rows:
+        return None, "Você não tem tarefas agendadas ativas para editar."
+
+    if ex.task_number is not None:
+        idx = ex.task_number - 1
+        if idx < 0 or idx >= len(rows):
+            return None, f"Tarefa #{idx + 1} não encontrada. Você tem {len(rows)} tarefa(s) ativa(s)."
+        return rows[idx], None
+
+    reference = _normalize_text(ex.task_reference_text or "")
+    if not reference:
+        if len(rows) == 1:
+            return rows[0], None
+        task_list = "\n".join(f"{i}. *{row['name']}*" for i, row in enumerate(rows, 1))
+        return None, (
+            "Qual tarefa agendada você quer editar?\n\n"
+            f"{task_list}\n\n"
+            "Você pode dizer, por exemplo: _edita a tarefa agendada 1_"
+        )
+
+    ref_tokens = {token for token in reference.split() if len(token) > 2}
+    scored_rows: list[tuple[float, dict]] = []
+    for row in rows:
+        haystack = _normalize_text(f"{row['name']} {row['prompt']}")
+        ratio = SequenceMatcher(None, reference, haystack).ratio()
+        token_hits = sum(1 for token in ref_tokens if token in haystack)
+        token_score = token_hits / max(len(ref_tokens), 1)
+        substring_bonus = 0.25 if reference and reference in haystack else 0.0
+        scored_rows.append((max(ratio, token_score) + substring_bonus, row))
+
+    scored_rows.sort(key=lambda item: item[0], reverse=True)
+    best_score, best_row = scored_rows[0]
+    second_score = scored_rows[1][0] if len(scored_rows) > 1 else 0.0
+
+    if best_score < 0.35 or (second_score and best_score - second_score < 0.12):
+        task_list = "\n".join(f"{i}. *{row['name']}*" for i, row in enumerate(rows, 1))
+        return None, (
+            "Encontrei mais de uma tarefa possível ou não consegui identificar com segurança.\n\n"
+            f"{task_list}\n\n"
+            "Me diga o número da tarefa, por exemplo: _edita a tarefa agendada 1_"
+        )
+
+    return best_row, None
 
 
 async def _send_whatsapp(phone: str, message: str) -> None:
@@ -216,6 +296,9 @@ async def handle_scheduled_task(phone: str, text: str, scheduler: AsyncScheduler
     if action == "cancel":
         return await _handle_cancel(phone, extraction, scheduler)
 
+    if action == "edit":
+        return await _handle_edit(phone, extraction, scheduler)
+
     return await _handle_create(phone, extraction, scheduler)
 
 
@@ -283,6 +366,7 @@ async def _handle_list(phone: str) -> str:
         )
 
     lines.append("\nPara cancelar: _cancela a tarefa agendada 1_")
+    lines.append("Para editar: _edita a tarefa agendada 1 para todo dia às 10h_")
     return "\n".join(lines)
 
 
@@ -307,6 +391,67 @@ async def _handle_cancel(
             pass
 
     return f"✅ Tarefa agendada cancelada: *{row['name']}*"
+
+
+async def _handle_edit(
+    phone: str, ex: TaskExtraction, scheduler: AsyncScheduler
+) -> str:
+    rows = await get_tasks(phone)
+    row, error = _resolve_task_reference(rows, ex)
+    if error:
+        return error
+    assert row is not None
+
+    new_name = ex.new_name or row["name"]
+    new_prompt = ex.new_prompt or row["prompt"]
+    new_cron_expression = ex.new_cron_expression or row["cron_expression"]
+
+    changed_fields: dict[str, str] = {}
+    if new_name != row["name"]:
+        changed_fields["name"] = new_name
+    if new_prompt != row["prompt"]:
+        changed_fields["prompt"] = new_prompt
+    if new_cron_expression != row["cron_expression"]:
+        try:
+            _parse_cron(new_cron_expression)
+        except ValueError:
+            schedule_label = ex.new_cron_readable or new_cron_expression
+            return f"Não consegui interpretar o novo agendamento '{schedule_label}'. Tente ser mais específico."
+        changed_fields["cron_expression"] = new_cron_expression
+
+    if not changed_fields:
+        return (
+            "Não identifiquei o que você quer mudar nessa tarefa.\n\n"
+            "Você pode alterar o conteúdo, o horário ou ambos. Exemplo:\n"
+            "• _edita a tarefa agendada 1 para incluir uma breve reflexão_\n"
+            "• _muda a tarefa agendada 1 para todo dia às 10h_"
+        )
+
+    if row.get("job_id"):
+        try:
+            await scheduler.remove_schedule(row["job_id"])
+        except Exception:
+            pass
+
+    await update_task(row["id"], **changed_fields)
+
+    job_id = await _schedule_job(
+        task_id=row["id"],
+        phone=phone,
+        name=new_name,
+        prompt=new_prompt,
+        cron_expression=new_cron_expression,
+        scheduler=scheduler,
+    )
+    await update_job_id(row["id"], job_id)
+
+    schedule_display = ex.new_cron_readable or new_cron_expression
+    return (
+        f"✅ Tarefa agendada atualizada!\n"
+        f"📌 *{new_name}*\n"
+        f"🕐 {schedule_display}\n"
+        f"📝 _{new_prompt[:120]}{'...' if len(new_prompt) > 120 else ''}_"
+    )
 
 
 async def restore_scheduled_jobs(scheduler: AsyncScheduler) -> int:

@@ -51,6 +51,13 @@ This includes questions like "o que você faz?", "você consegue X?", \
 "como funciona o lembrete?", "quais são as funções?", \
 "o que mais você sabe fazer?", "me explica como usar".
 
+Important distinction:
+- Questions about capability or instructions are SELF.
+- Actual operational requests to create, list, edit, cancel, or modify reminders \
+  or scheduled tasks are NOT SELF.
+- Examples that are NOT SELF: "modifique a tarefa agendada 1", \
+  "muda o lembrete 2 para 11h", "quais são minhas tarefas agendadas?".
+
 Reply with exactly one word: SIMPLE, COMPLEX, or SELF."""
 
 _NEW_SESSION_PATTERNS = [
