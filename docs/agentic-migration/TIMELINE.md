@@ -41,6 +41,42 @@
 - `AGENTIC_MODE=False` por padrão (sem risco de quebrar produção)
 - Zero erros de linter
 
+### [2026-03-21] Primeiro teste em produção — sucesso
+
+**Deploy:** Railway apontado para `feature/agentic-loop`, variável `AGENTIC_MODE=true`
+
+**Resultados do teste (conversa real via WhatsApp):**
+
+| Cenário testado | Resultado | Tools chamadas |
+|---|---|---|
+| Chat simples ("oi, tudo bem?") | OK — resposta natural | nenhuma |
+| Listar lembretes | OK — retornou lista vazia corretamente | `list_reminders` |
+| Perguntar capacidades | OK — listou todas as skills disponíveis | nenhuma (respondeu do system prompt) |
+| Listar tarefas agendadas | OK — mostrou tarefa existente | `list_scheduled_tasks` |
+| Cancelar tarefa agendada | OK — cancelou corretamente | `cancel_scheduled_task` |
+| Áudio com "Aisha" (chat por voz) | OK — respondeu + salvou contexto pessoal | `set_personal_context` |
+| Áudio sem "Aisha" (transcrição) | OK — transcreveu normalmente | nenhuma (fora do agente) |
+| Criar lembrete com pesquisa ("me lembra + pesquise endereço") | OK — multi-tool no mesmo turno | `create_reminder` + `web_search` |
+| Link do X/Twitter (leitura) | OK — resumiu o post | `read_webpage` |
+| Download de vídeo do X | OK — gerou link temporário | `download_video` |
+| **Intenção composta** ("pesquisa sobre IA generativa e me lembra de revisar amanhã") | **OK** — executou ambas as intenções | `web_search` + `create_reminder` |
+
+**Observações qualitativas:**
+- O modelo sugere próximas ações proativamente (antes não fazia)
+- A consciência de todas as tools no system prompt melhora a coerência das respostas
+- Latência aceitável (respostas em ~5-10s para chamadas com tools)
+- A intenção composta funcionou de primeira — era impossível no sistema antigo
+
+**Problemas encontrados:** Nenhum
+
+---
+
+## Fase 1.5 — Pendente: merge na main
+
+- [ ] Merge da branch `feature/agentic-loop` na `main` via Pull Request
+- [ ] Railway volta a apontar para `main`
+- [ ] Remover código legacy (`_handle_chat_legacy`) após período de estabilidade
+
 ---
 
 ## Fase 2 — Planejada
