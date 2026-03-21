@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from aisha.skills.chat import chat, chat_with_document, chat_with_image, chat_with_webpage, classify, classify_pending_response, wants_new_session
 from aisha.config import (
+    AGENTIC_MODE,
     ALLOWED_NUMBERS,
     BASE_URL,
     DATABASE_PASSWORD,
@@ -496,6 +497,55 @@ async def _execute_pending(sender: str, text: str) -> bool:
 
 async def handle_chat(sender: str, text: str):
     """Routes a text message through Aisha chat (or reminder/youtube skill) and sends the response."""
+    if AGENTIC_MODE:
+        await _handle_chat_agentic(sender, text)
+    else:
+        await _handle_chat_legacy(sender, text)
+
+
+async def _handle_chat_agentic(sender: str, text: str):
+    """Agentic mode: model decides which tools to call autonomously."""
+    from aisha.agent import run_agent
+    from aisha.skills.chat import wants_new_session
+
+    try:
+        if _is_retroactive_transcription_request(text):
+            raw = pop_raw_transcription(sender)
+            if raw:
+                log.info(f"Retroactive transcription request for {sender}")
+                await _send_refined_transcription(sender, raw)
+                return
+
+        if wants_new_session(text):
+            await delete_session(sender)
+            log.info(f"Session reset requested by {sender}")
+
+        prev_id = await get_response_id(sender)
+        result = await run_agent(
+            user_input=text,
+            previous_response_id=prev_id,
+            phone=sender,
+            scheduler=scheduler,
+        )
+
+        if result.response_id:
+            await upsert_session(sender, result.response_id)
+        if result.image_bytes:
+            await send_image(sender, result.image_bytes)
+        if result.text:
+            await send_message(sender, result.text)
+
+        if result.tools_called:
+            for tool_name in result.tools_called:
+                await increment_stat(sender, f"tool_{tool_name}")
+
+    except Exception as e:
+        log.exception("Agentic chat failed")
+        await send_message(sender, f"Erro no chat: {e}")
+
+
+async def _handle_chat_legacy(sender: str, text: str):
+    """Legacy mode: classifier + if/elif routing (original implementation)."""
     try:
         # 0. Retroactive transcription request ("eu só queria a transcrição mesmo")
         if _is_retroactive_transcription_request(text):
@@ -740,7 +790,18 @@ async def handle_audio(sender: str, message: dict):
         user_input = _strip_aisha(raw_text) if has_aisha else raw_text
         log.info(f"Routing to chat (new_session={is_new_session}, has_aisha={has_aisha})")
         store_raw_transcription(sender, raw_text)
-        result = await chat(user_input, previous_response_id=prev_id, phone=sender)
+
+        if AGENTIC_MODE:
+            from aisha.agent import run_agent
+            result = await run_agent(
+                user_input=user_input,
+                previous_response_id=prev_id,
+                phone=sender,
+                scheduler=scheduler,
+            )
+        else:
+            result = await chat(user_input, previous_response_id=prev_id, phone=sender)
+
         if result.response_id:
             await upsert_session(sender, result.response_id)
         if result.image_bytes:
