@@ -71,10 +71,11 @@
 
 ---
 
-## Fase 1.5 — Pendente: merge na main
+### [2026-03-21] Merge na main
 
-- [ ] Merge da branch `feature/agentic-loop` na `main` via Pull Request
-- [ ] Railway volta a apontar para `main`
+- [x] Merge da branch `feature/agentic-loop` na `main` (fast-forward, sem conflitos)
+- [x] Push para GitHub — Railway faz redeploy automático da `main`
+- [ ] Apontar Railway de volta para `main` (se estava apontado para a branch)
 - [ ] Remover código legacy (`_handle_chat_legacy`) após período de estabilidade
 
 ---
