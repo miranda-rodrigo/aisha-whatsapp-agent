@@ -106,6 +106,15 @@ async def analyze_video(url: str, instruction: str) -> str:
             )
         if e.code == 400:
             log.warning(f"Gemini 400 for {url}: {e}")
+            if "token count exceeds" in str(e).lower() or "maximum number of tokens" in str(e).lower():
+                return (
+                    "Esse vídeo é longo demais para eu processar inteiro de uma vez "
+                    "(excede o limite do Gemini).\n\n"
+                    "Você pode:\n"
+                    "• Enviar o link com um *timestamp* específico — ex: `?t=1800` para começar aos 30min\n"
+                    "• Me pedir um trecho: _\"analise os primeiros 20 minutos\"_ ou _\"a partir de 1h50\"_\n"
+                    "• Colar a *transcrição* ou *legenda* do vídeo diretamente no chat"
+                )
             return (
                 "Não consegui processar esse vídeo. "
                 "Verifique se o link é válido e o vídeo está disponível publicamente."
