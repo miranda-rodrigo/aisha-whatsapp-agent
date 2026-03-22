@@ -118,7 +118,7 @@ def _is_duplicate(msg_id: str) -> bool:
 _last_reply_time: dict[str, float] = {}
 
 # --- Processing lock per user (Layer 6) ---
-_processing: set[str] = {}  # phones currently being processed by the agent
+_processing: set[str] = set()  # phones currently being processed by the agent
 
 _project_ref = SUPABASE_URL.replace("https://", "").split(".")[0]
 _DB_URL = (
