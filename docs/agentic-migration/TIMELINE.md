@@ -80,6 +80,31 @@
 
 ---
 
+### [2026-03-22] Correção: lembretes duplicados em follow-ups
+
+**Problema identificado em produção:**
+
+Quando o usuário enviava duas mensagens sobre o mesmo lembrete em sequência — a primeira criando e a segunda refinando (ex: pedindo para incluir o endereço) — o sistema criava dois lembretes distintos. O motivo: o agente não sabia quais lembretes já existiam, então classificava o follow-up como uma nova criação.
+
+**Diagnóstico via logs do Railway:**
+- Dois lembretes da igreja dispararam simultâneamente às 11:45 UTC: `4bde967e` ("Ida à igreja AD Zona Sul") e `6fd5b3a1` ("Ida à igreja Assembleia de Deus Zona Sul")
+- Confirmado que ambos foram inseridos como registros independentes via chamadas separadas a `create_reminder`
+
+**Solução implementada (3 camadas):**
+
+1. **Tool `edit_reminder`** — nova tool que permite atualizar data/hora, mensagem ou recorrência de um lembrete existente pelo número. Evita a necessidade de cancelar + recriar.
+
+2. **Lembretes ativos no system prompt** — a cada chamada ao agente, os lembretes pendentes do usuário são buscados e injetados no `instructions` do modelo. O modelo passa a ver o que já existe antes de decidir criar ou editar.
+
+3. **Instrução de não-duplicata** — a descrição de `create_reminder` agora instrui explicitamente o modelo a verificar os lembretes ativos antes de criar, e a preferir `edit_reminder` se o assunto já existe.
+
+**Arquivos modificados:**
+- `aisha/tools/reminder.py` — adicionada `tool_edit_reminder`
+- `aisha/tools/__init__.py` — registrada `edit_reminder` em `TOOL_DEFINITIONS` e `_DISPATCH`; instrução de `create_reminder` atualizada
+- `aisha/agent.py` — `run_agent` busca lembretes ativos e passa para `_build_system_prompt`; `_build_system_prompt` recebe e serializa a lista no `instructions`
+
+---
+
 ## Fase 2 — Planejada
 
 - Migrar `handle_image` e `handle_document` para o agente (input multimodal)

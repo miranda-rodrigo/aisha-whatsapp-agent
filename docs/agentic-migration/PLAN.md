@@ -47,6 +47,7 @@ aisha/
 | create_reminder | custom function | Cria lembrete com data/hora |
 | list_reminders | custom function | Lista lembretes ativos |
 | cancel_reminder | custom function | Cancela lembrete por número |
+| edit_reminder | custom function | Edita mensagem, data/hora ou recorrência de lembrete existente |
 | create_scheduled_task | custom function | Cria tarefa agendada recorrente |
 | list_scheduled_tasks | custom function | Lista tarefas agendadas |
 | cancel_scheduled_task | custom function | Cancela tarefa agendada |

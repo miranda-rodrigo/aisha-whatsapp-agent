@@ -43,7 +43,7 @@ def _now_str(user_tz: str) -> str:
     return f"{wd}, {now.day} de {month} de {now.year}, {now.strftime('%H:%M')}"
 
 
-def _build_system_prompt(profile: dict | None, user_tz: str) -> str:
+def _build_system_prompt(profile: dict | None, user_tz: str, active_reminders: list[dict] | None = None) -> str:
     parts = [
         "Você é Aisha, uma assistente pessoal inteligente e amigável que opera via WhatsApp.",
         "",
@@ -52,7 +52,9 @@ def _build_system_prompt(profile: dict | None, user_tz: str) -> str:
         "- Use o idioma do usuário (ou o idioma preferido dele, se configurado).",
         "- Quando a resposta exigir informações atualizadas, use web_search.",
         "- Quando o usuário pedir para gerar ou editar uma imagem, use image_generation.",
-        "- Quando o usuário pedir um lembrete, use create_reminder.",
+        "- Quando o usuário pedir um lembrete, verifique os LEMBRETES ATIVOS abaixo antes de agir:",
+        "    * Se já existe um lembrete sobre o mesmo assunto/evento, use edit_reminder para atualizá-lo.",
+        "    * Só use create_reminder se o lembrete é claramente novo e não existe ainda.",
         "- Quando o usuário pedir uma tarefa recorrente/agendada, use create_scheduled_task.",
         "- Quando o usuário enviar um link do YouTube, use analyze_youtube_video.",
         "- Quando o usuário enviar qualquer outro link, use read_webpage.",
@@ -71,6 +73,15 @@ def _build_system_prompt(profile: dict | None, user_tz: str) -> str:
             parts.append(f"\nContexto pessoal do usuário:\n{profile['personal_context']}")
         if profile.get("language"):
             parts.append(f"\nIdioma preferido: {profile['language']}. Responda nesse idioma.")
+
+    if active_reminders:
+        lines = ["\nLEMBRETES ATIVOS DO USUÁRIO (use edit_reminder antes de criar um novo sobre o mesmo assunto):"]
+        for r in active_reminders:
+            recur = " [recorrente]" if r.get("is_recurring") else ""
+            lines.append(f"  #{r['number']}. {r['message']} — {r['datetime_display']}{recur}")
+        parts.append("\n".join(lines))
+    else:
+        parts.append("\nLEMBRETES ATIVOS DO USUÁRIO: nenhum.")
 
     return "\n".join(parts)
 
@@ -92,10 +103,31 @@ async def run_agent(
 ) -> AgentResult:
     """Execute the agentic loop: model decides tools, we execute, repeat until done."""
     from aisha.user_profile import get_profile
+    from aisha.skills.reminder_store import get_reminders
+    from aisha.skills.reminder import _fmt_local
+    from datetime import datetime as _datetime
 
     profile = await get_profile(phone) if phone else None
     user_tz = (profile or {}).get("timezone") or USER_TIMEZONE
-    instructions = _build_system_prompt(profile, user_tz)
+
+    active_reminders: list[dict] | None = None
+    if phone:
+        try:
+            rows = await get_reminders(phone)
+            if rows:
+                active_reminders = []
+                for i, row in enumerate(rows, 1):
+                    dt_utc = _datetime.fromisoformat(row["scheduled_at"])
+                    active_reminders.append({
+                        "number": i,
+                        "message": row["message"],
+                        "datetime_display": _fmt_local(dt_utc, row.get("timezone") or user_tz),
+                        "is_recurring": row.get("is_recurring", False),
+                    })
+        except Exception:
+            log.warning("Failed to fetch active reminders for system prompt", exc_info=True)
+
+    instructions = _build_system_prompt(profile, user_tz, active_reminders)
 
     ctx = ToolContext(
         phone=phone or "",

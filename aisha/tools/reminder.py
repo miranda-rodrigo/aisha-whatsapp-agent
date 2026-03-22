@@ -101,6 +101,77 @@ async def tool_list_reminders(args: dict, ctx: ToolContext) -> str:
     return json.dumps({"reminders": reminders})
 
 
+async def tool_edit_reminder(args: dict, ctx: ToolContext) -> str:
+    from aisha.config import REMINDER_LEAD_MINUTES
+    from aisha.skills.reminder_store import get_reminders, update_reminder, update_job_id
+    from aisha.skills.reminder import (
+        _schedule_job, _gcal_link, _fmt_local, _parse_dt_iso, _rrule_to_trigger
+    )
+
+    reminder_number = args.get("reminder_number", 1)
+    new_datetime_iso = args.get("new_datetime_iso")
+    new_message = args.get("new_message")
+    new_cron_expression = args.get("new_cron_expression")
+
+    rows = await get_reminders(ctx.phone)
+    if not rows:
+        return json.dumps({"error": "Nenhum lembrete ativo para editar."})
+
+    idx = reminder_number - 1
+    if idx < 0 or idx >= len(rows):
+        return json.dumps({"error": f"Lembrete #{reminder_number} não encontrado. Total: {len(rows)}."})
+
+    row = rows[idx]
+
+    new_scheduled_at = None
+    if new_datetime_iso:
+        new_scheduled_at = _parse_dt_iso(new_datetime_iso, ctx.user_tz)
+        if not new_scheduled_at:
+            return json.dumps({"error": f"Não consegui interpretar a data: {new_datetime_iso}"})
+
+    if new_scheduled_at is None:
+        new_scheduled_at = datetime.fromisoformat(row["scheduled_at"])
+
+    rrule = None
+    if new_cron_expression:
+        rrule = f"CRON:{new_cron_expression}"
+    elif row.get("rrule"):
+        rrule = row["rrule"]
+
+    if row.get("job_id"):
+        try:
+            await ctx.scheduler.remove_schedule(row["job_id"])
+        except Exception:
+            pass
+
+    await update_reminder(row["id"], new_scheduled_at, rrule)
+
+    message = new_message or row["message"]
+    lead_minutes = REMINDER_LEAD_MINUTES
+    new_job_id = await _schedule_job(
+        reminder_id=row["id"],
+        phone=ctx.phone,
+        message=message,
+        scheduled_at=new_scheduled_at,
+        lead_minutes=lead_minutes,
+        is_recurring=row.get("is_recurring", False),
+        rrule=rrule,
+        scheduler=ctx.scheduler,
+    )
+    await update_job_id(row["id"], new_job_id)
+
+    event_display = _fmt_local(new_scheduled_at, ctx.user_tz)
+    gcal = _gcal_link(message, new_scheduled_at, ctx.user_tz)
+
+    return json.dumps({
+        "status": "updated",
+        "reminder_number": reminder_number,
+        "message": message,
+        "datetime_display": event_display,
+        "google_calendar_link": gcal,
+    })
+
+
 async def tool_cancel_reminder(args: dict, ctx: ToolContext) -> str:
     from aisha.skills.reminder_store import get_reminders, cancel_reminder
 

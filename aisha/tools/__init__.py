@@ -13,6 +13,7 @@ from aisha.tools.reminder import (
     tool_create_reminder,
     tool_list_reminders,
     tool_cancel_reminder,
+    tool_edit_reminder,
 )
 from aisha.tools.scheduled_task import (
     tool_create_scheduled_task,
@@ -47,9 +48,12 @@ TOOL_DEFINITIONS: list[dict] = [
         "type": "function",
         "name": "create_reminder",
         "description": (
-            "Create a reminder for the user. The reminder will fire at the specified "
+            "Create a NEW reminder for the user. The reminder will fire at the specified "
             "time with advance notice. Supports one-time and recurring reminders. "
-            "Use this when the user asks to be reminded of something."
+            "IMPORTANT: Before creating, check if there is already an existing reminder "
+            "about the same topic in the user's active reminders (visible in the system prompt). "
+            "If a similar reminder already exists (same event or topic), use edit_reminder instead. "
+            "Only call this when the user is requesting a brand-new reminder that doesn't exist yet."
         ),
         "parameters": {
             "type": "object",
@@ -106,6 +110,43 @@ TOOL_DEFINITIONS: list[dict] = [
                 "reminder_number": {
                     "type": "integer",
                     "description": "1-based index of the reminder to cancel (from the list)",
+                },
+            },
+            "required": ["reminder_number"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "edit_reminder",
+        "description": (
+            "Edit an existing reminder: update its date/time, message, or recurrence. "
+            "Use this when the user wants to change something about an existing reminder, "
+            "or when a follow-up message provides more details about a reminder that was just created "
+            "(e.g. updating the location, time, or message text). "
+            "Prefer this over creating a new reminder when the topic is the same."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "reminder_number": {
+                    "type": "integer",
+                    "description": "1-based index of the reminder to edit (from the active reminders list)",
+                },
+                "new_message": {
+                    "type": "string",
+                    "description": "New reminder message text. Leave empty to keep the existing one.",
+                },
+                "new_datetime_iso": {
+                    "type": "string",
+                    "description": (
+                        "New event datetime in ISO 8601 (YYYY-MM-DDTHH:MM:SS) "
+                        "in the user's local timezone. Leave empty to keep the existing time."
+                    ),
+                },
+                "new_cron_expression": {
+                    "type": "string",
+                    "description": "New 5-field cron expression for recurring reminders. Leave empty to keep existing.",
                 },
             },
             "required": ["reminder_number"],
@@ -299,6 +340,7 @@ _DISPATCH = {
     "create_reminder": tool_create_reminder,
     "list_reminders": tool_list_reminders,
     "cancel_reminder": tool_cancel_reminder,
+    "edit_reminder": tool_edit_reminder,
     "create_scheduled_task": tool_create_scheduled_task,
     "list_scheduled_tasks": tool_list_scheduled_tasks,
     "cancel_scheduled_task": tool_cancel_scheduled_task,

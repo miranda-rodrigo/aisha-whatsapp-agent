@@ -87,6 +87,7 @@ Aisha é uma assistente pessoal inteligente que roda no WhatsApp Business API. E
 - Suporte a lembretes recorrentes ("todo dia às 9h", "toda segunda às 7h")
 - Gerenciamento completo: listar, cancelar e editar lembretes
 - QA inteligente: se o horário já passou, sugere amanhã; se está muito próximo, pede confirmação
+- **Anti-duplicata:** o agente vê os lembretes ativos no system prompt e usa `edit_reminder` ao invés de criar novos quando o follow-up é sobre o mesmo evento
 
 **Exemplos:**
 ```
@@ -495,3 +496,4 @@ No painel de developers.facebook.com:
 - **Tarefas agendadas vs. lembretes:** Lembretes enviam texto fixo na hora agendada. Tarefas agendadas executam um prompt completo com `gpt-5.4` + `web_search` a cada disparo, gerando conteúdo dinâmico. Ambos usam APScheduler com persistência no PostgreSQL.
 - **Restauração de jobs:** No startup do servidor, todos os jobs de tarefas agendadas são restaurados do banco para o scheduler. Isso garante que tarefas sobrevivam redeploys.
 - **Logs:** Se a pasta `logs/` existir na raiz do projeto, o app escreve em `logs/aisha.log` com rotação automática (5 MB × 3 arquivos). Caso contrário, só imprime no stdout.
+- **Anti-duplicata de lembretes:** A cada chamada ao agente, os lembretes ativos do usuário são buscados no Supabase e injetados no `instructions` do modelo. Isso permite que o modelo use `edit_reminder` em follow-ups (ex: "inclua o endereço no lembrete") ao invés de criar um segundo lembrete sobre o mesmo evento.
