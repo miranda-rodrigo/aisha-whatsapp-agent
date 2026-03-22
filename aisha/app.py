@@ -117,6 +117,9 @@ def _is_duplicate(msg_id: str) -> bool:
 # --- Temporal echo detection (Layer 4) ---
 _last_reply_time: dict[str, float] = {}
 
+# --- Processing lock per user (Layer 6) ---
+_processing: set[str] = {}  # phones currently being processed by the agent
+
 _project_ref = SUPABASE_URL.replace("https://", "").split(".")[0]
 _DB_URL = (
     f"postgresql+asyncpg://postgres.{_project_ref}:{DATABASE_PASSWORD}"
@@ -508,6 +511,14 @@ async def _handle_chat_agentic(sender: str, text: str):
     from aisha.agent import run_agent
     from aisha.skills.chat import wants_new_session
 
+    if sender in _processing:
+        log.info(f"User {sender} sent message while agent is busy — replying with wait message")
+        await send_message(
+            sender,
+            "⏳ Ainda estou processando sua mensagem anterior. Aguarde um momento, por favor!",
+        )
+        return
+
     try:
         if _is_retroactive_transcription_request(text):
             raw = pop_raw_transcription(sender)
@@ -519,6 +530,9 @@ async def _handle_chat_agentic(sender: str, text: str):
         if wants_new_session(text):
             await delete_session(sender)
             log.info(f"Session reset requested by {sender}")
+
+        _processing.add(sender)
+        await send_message(sender, "⏳ Processando...")
 
         prev_id = await get_response_id(sender)
         result = await run_agent(
@@ -542,6 +556,8 @@ async def _handle_chat_agentic(sender: str, text: str):
     except Exception as e:
         log.exception("Agentic chat failed")
         await send_message(sender, f"Erro no chat: {e}")
+    finally:
+        _processing.discard(sender)
 
 
 async def _handle_chat_legacy(sender: str, text: str):
@@ -793,12 +809,16 @@ async def handle_audio(sender: str, message: dict):
 
         if AGENTIC_MODE:
             from aisha.agent import run_agent
-            result = await run_agent(
-                user_input=user_input,
-                previous_response_id=prev_id,
-                phone=sender,
-                scheduler=scheduler,
-            )
+            _processing.add(sender)
+            try:
+                result = await run_agent(
+                    user_input=user_input,
+                    previous_response_id=prev_id,
+                    phone=sender,
+                    scheduler=scheduler,
+                )
+            finally:
+                _processing.discard(sender)
         else:
             result = await chat(user_input, previous_response_id=prev_id, phone=sender)
 

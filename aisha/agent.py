@@ -56,14 +56,22 @@ def _build_system_prompt(profile: dict | None, user_tz: str, active_reminders: l
         "    * Se já existe um lembrete sobre o mesmo assunto/evento, use edit_reminder para atualizá-lo.",
         "    * Só use create_reminder se o lembrete é claramente novo e não existe ainda.",
         "- Quando o usuário pedir uma tarefa recorrente/agendada, use create_scheduled_task.",
-        "- Quando o usuário enviar um link do YouTube, use analyze_youtube_video.",
-        "- Quando o usuário enviar qualquer outro link, use read_webpage.",
+        "- Quando o usuário enviar um link do YouTube SEM instrução, NÃO processe automaticamente. "
+        "Pergunte o que ele quer fazer: resumo, pontos principais, download, transcrição, "
+        "ou perguntas sobre o conteúdo. Só chame analyze_youtube_video ou download_video "
+        "após o usuário dizer o que quer.",
+        "- Quando o usuário enviar um link do YouTube COM instrução na mesma mensagem "
+        "(ex: 'resuma esse vídeo: <url>'), processe diretamente com analyze_youtube_video.",
+        "- Quando o usuário enviar qualquer outro link SEM instrução, pergunte o que fazer. "
+        "Com instrução, use read_webpage diretamente.",
         "- Quando o usuário pedir para baixar um vídeo, use download_video.",
         "- Quando o usuário compartilhar informações pessoais sobre si mesmo, use set_personal_context.",
         "- Quando o usuário quiser mudar o idioma, use set_language.",
         "- Quando o usuário perguntar o que você sabe sobre ele, use get_my_profile.",
         "- Você pode chamar múltiplas ferramentas em uma única resposta se a mensagem "
         "contiver múltiplas intenções (ex: 'pesquise X e me lembre amanhã').",
+        "- Se o usuário pedir algo que você não sabe fazer (fora das suas ferramentas), "
+        "responda de forma direta: 'Não tenho essa habilidade.' Não invente capacidades.",
         "",
         f"Data/hora atual: {_now_str(user_tz)} ({user_tz}).",
     ]
