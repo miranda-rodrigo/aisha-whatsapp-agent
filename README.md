@@ -1,23 +1,19 @@
 # Aisha — Assistente Pessoal via WhatsApp
 
-Aisha é uma assistente pessoal inteligente que roda no WhatsApp Business API. Ela conversa, transcreve áudios, pesquisa na web, gera imagens, cria lembretes, agenda tarefas recorrentes, analisa documentos, entende vídeos do YouTube e mantém contexto de conversa — tudo pelo WhatsApp.
+Aisha é uma assistente pessoal orientada a tarefas que roda no WhatsApp Business API. Ela não é um chatbot para bate-papo — seu papel é executar ações concretas: transcrever áudios, pesquisar na web, gerar imagens, criar lembretes, agendar tarefas recorrentes, analisar documentos e vídeos do YouTube — tudo pelo WhatsApp.
 
 ## Funcionalidades
 
-### Conversa com IA (roteamento automático de modelo)
-- Qualquer mensagem de texto vai direto para o chat
-- Um classificador leve (gpt-4.1-mini) decide qual modelo usar:
-  - **Simples** (saudações, perguntas diretas, bate-papo casual) → `gpt-4.1` — rápido e barato
-  - **Complexo** (raciocínio, pesquisa, geração de imagem, tarefas técnicas) → `gpt-5.4` — mais capaz
-  - **Self** (perguntas sobre a própria Aisha, skills, como usar) → `gpt-4.1` com contexto de skills
-- A Aisha responde de forma natural no idioma do usuário
+### Comportamento orientado a tarefas
+- **Ação clara** (criar lembrete, pesquisar, resumir, gerar imagem) → executa diretamente
+- **Pergunta direta** ("qual o dólar hoje?", "o que é inflação?") → responde com informação
+- **Conteúdo ambíguo** (texto encaminhado, ata, link sem instrução) → pergunta: "O que você quer que eu faça com isso?"
+- **Pedido impossível** → responde: "Não tenho essa habilidade."
+- Responde de forma natural no idioma do usuário
 - Mantém contexto da conversa por até 10 minutos de inatividade
 - Para iniciar um novo assunto, diga: "nova conversa", "novo assunto", "mudar de assunto" ou "reset"
-
-### Auto-Consciência
-- A Aisha sabe responder sobre suas próprias capacidades
-- Exemplos: "o que você faz?", "você pode criar lembretes?", "como funciona a transcrição?"
-- O conteúdo das skills é carregado de `skills.md` (raiz do projeto) e injetado no prompt quando necessário
+- Feedback imediato: envia "⏳ Processando..." assim que recebe a mensagem, antes de iniciar o processamento
+- Se o usuário enviar outra mensagem enquanto a anterior ainda está sendo processada, a Aisha avisa que está ocupada e pede para aguardar
 
 ### Personalização e Perfil
 - **Contexto pessoal:** envie informações sobre você e a Aisha lembra para sempre

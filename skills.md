@@ -1,23 +1,28 @@
 # Aisha — Guia de Habilidades
 
-Tudo que a Aisha sabe fazer e como usar cada funcionalidade.
+A Aisha é uma assistente pessoal orientada a tarefas. Ela não é um chatbot para bate-papo — seu papel é executar ações concretas para você.
 
 ---
 
-## 1. Conversa
+## 1. Como funciona
 
-A Aisha é uma assistente conversacional. Qualquer mensagem de texto vai direto para o chat — sem comandos especiais.
+A Aisha analisa cada mensagem e decide o que fazer:
 
-**Como usar:**
+- **Ação clara** → executa diretamente (criar lembrete, pesquisar, resumir, etc.)
+- **Pergunta direta** → responde com informação (usa busca na web se necessário)
+- **Conteúdo ambíguo** (texto encaminhado, ata, lista, link sem instrução) → pergunta: *"O que você quer que eu faça com isso?"*
+- **Pedido impossível** → responde: *"Não tenho essa habilidade."*
+
+**Exemplos:**
 ```
-Você: oi, tudo bem?
-Aisha: Oi! Tudo ótimo, e você?
+Você: qual o dólar hoje?
+Aisha: [pesquisa e responde]
 
-Você: me explica o que é juros compostos
-Aisha: Claro! Juros compostos são...
+Você: [encaminha uma ata de reunião]
+Aisha: O que você quer que eu faça com isso? Posso resumir, extrair pontos-chave, criar lembretes...
 
-Você: qual a diferença entre Python e JavaScript?
-Aisha: As principais diferenças são...
+Você: faz uma ligação pra mim
+Aisha: Não tenho essa habilidade.
 ```
 
 **Contexto de conversa:**
@@ -448,13 +453,12 @@ Você: baixa o vídeo
 
 ## 14. Roteamento Automático de Modelo
 
-A Aisha escolhe automaticamente o melhor modelo para cada mensagem — você não precisa fazer nada:
+A Aisha escolhe automaticamente o melhor modelo para cada tarefa — você não precisa fazer nada:
 
-| Tipo de mensagem | Modelo usado |
+| Tipo de tarefa | Modelo usado |
 |---|---|
-| Classificação de complexidade | `gpt-4.1-mini` — barato e rápido |
-| Saudações, perguntas simples, bate-papo | `gpt-4.1` — rápido |
-| Pesquisa, raciocínio, tarefas técnicas | `gpt-5.4` — mais capaz |
+| Orquestração geral (agente) | `gpt-5.4` — decide quais ferramentas usar |
+| Pesquisa, raciocínio, tarefas complexas | `gpt-5.4` — mais capaz |
 | Geração e edição de imagem | `gpt-5.4` + ferramenta `image_generation` |
 | Transcrição de áudio | `whisper-1` |
 | Refinamento de transcrição | `gpt-4o-mini` |
