@@ -389,53 +389,42 @@ Configure a URL gerada (`https://xxxx.ngrok.io/webhook`) no painel da Meta.
 4. A URL de produção será algo como: `https://seu-projeto.up.railway.app`
 5. Configure essa URL como webhook no Meta for Developers
 
-### 6. Logs e Monitoramento (Railway)
+### 6. Logs, variáveis e banco (MCP)
 
-O Railway CLI é a forma mais prática de acessar logs de produção diretamente do terminal.
+A forma recomendada de operar produção a partir do Cursor é via **MCP** (Model Context Protocol). O agente chama tools estruturadas em linguagem natural — sem montar queries GraphQL ou lembrar comandos do CLI.
 
-**Instalação e autenticação (primeira vez):**
+A config do projeto fica em `.cursor/mcp.json`. Essa pasta é convenção **do Cursor** (assim como o VS Code usa `.vscode/`). Não é exigência do protocolo MCP em si; outros editores usam caminhos diferentes. Versionamos `.cursor/mcp.json` no repo para que qualquer dev abra o projeto já com Railway + Supabase configurados.
+
+**Pré-requisitos (uma vez):**
 ```bash
 npm install -g @railway/cli
 railway login        # abre o browser para autenticar
+railway link         # Aisha-agent → production
 ```
 
-**Linkar o projeto ao repositório local:**
-```bash
-# Na raiz do projeto
-railway link         # seleciona workspace → Aisha-agent → production
-```
+Depois, recarregue o Cursor (ou abra **Settings → MCP**) para carregar os servidores.
 
-Isso grava as IDs de projeto/ambiente em `~/.railway/config.json`. Só precisa fazer uma vez.
+**Servidores configurados:**
 
-**Ver logs em tempo real:**
+| MCP | O que faz | Exemplos no chat |
+|---|---|---|
+| **Railway** (local) | Logs, variáveis de ambiente, deploy | *"Mostra erros recentes do whatsapp-agent"*, *"Atualiza WHATSAPP_TOKEN no Railway"* |
+| **Supabase** (remoto, read-only) | Consultas SQL no banco de produção | *"Lista lembretes pendentes do 558599065040"*, *"Quantas sessões ativas existem?"* |
+
+O Supabase MCP usa `read_only=true` por padrão — só consulta, não altera dados.
+
+**Autenticação:**
+- **Railway:** usa o CLI já logado (`railway login`). Se expirar, rode `railway login` de novo.
+- **Supabase:** OAuth no browser na primeira conexão (sem PAT no disco).
+
+**Fallback via CLI** (quando MCP não estiver disponível):
 ```bash
 railway logs --service whatsapp-agent
+railway variables --service whatsapp-agent
+railway variables --service whatsapp-agent --set "NOME=valor"
 ```
 
-**Buscar logs da última hora via API (útil para debug):**
-
-O CLI não aceita filtro por tempo, mas a API GraphQL do Railway aceita. O script abaixo extrai os logs da última hora e separa erros de linhas normais:
-
-```bash
-TOKEN=$(python3 -c "import json; d=json.load(open('$HOME/.railway/config.json')); print(d['user']['token'])")
-ENV_ID=$(python3 -c "import json; d=json.load(open('$HOME/.railway/config.json')); print(list(d['projects'].values())[0]['environment'])")
-START=$(python3 -c "from datetime import datetime,timezone,timedelta; print((datetime.now(timezone.utc)-timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
-
-curl -s -X POST https://backboard.railway.com/graphql/v2 \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"query\": \"{ environmentLogs(environmentId: \\\"$ENV_ID\\\", afterDate: \\\"$START\\\", afterLimit: 500) { timestamp severity message } }\"}" \
-| python3 -c "
-import json, sys
-logs = json.load(sys.stdin)['data']['environmentLogs']
-errors = [l for l in logs if l['severity'].lower() in ('error','critical','fatal','warning')]
-print(f'Total: {len(logs)} linhas | Erros/Warnings: {len(errors)}')
-for l in errors:
-    print(l['timestamp'][:19], f'[{l[\"severity\"]}]', l['message'])
-"
-```
-
-> **Observação:** As IDs de projeto ficam gravadas após o `railway link`. Se trocar de máquina, repita o link. O `service` no config fica `null` — passe sempre `--service whatsapp-agent` no CLI.
+> **Observação:** O `service` no config local fica `null` após o `railway link` — passe sempre `--service whatsapp-agent` no CLI.
 
 ### 7. Configurar webhook na Meta
 
