@@ -227,7 +227,9 @@ TOOL_DEFINITIONS: list[dict] = [
             "This IS the YouTube transcription skill. Use it when the user sends a YouTube URL "
             "and wants a transcript, summary, or analysis — including when that intent came from "
             "the previous turn (e.g. they asked if you can transcribe, then sent the link). "
-            "Do not ask again if the intent is already clear."
+            "Do not ask again if the intent is already clear. "
+            "Videos longer than 25 minutes return a summary plus a TXT download_link — "
+            "always include that link in your reply."
         ),
         "parameters": {
             "type": "object",

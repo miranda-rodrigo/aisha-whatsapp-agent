@@ -74,10 +74,12 @@ from aisha.skills.timezone_inference import infer_timezone
 from aisha.skills.transcribe import transcribe_audio_bytes
 from aisha.user_profile import get_profile, increment_stat, upsert_timezone
 from aisha.skills.youtube import (
+    VideoAnalysis,
     analyze_video,
     clear_pending_video,
     extract_youtube_url,
     get_pending_video,
+    pop_pending_transcript,
     store_pending_video,
     strip_youtube_url,
 )
@@ -239,7 +241,7 @@ async def serve_download(token: str):
     return FileResponse(
         path=entry.filepath,
         filename=entry.filename,
-        media_type="video/mp4",
+        media_type=entry.media_type or "application/octet-stream",
     )
 
 
@@ -493,8 +495,8 @@ async def _execute_pending(sender: str, text: str) -> bool:
         else:
             await send_message(sender, "⏳ Analisando vídeo...")
             await increment_stat(sender, "youtube")
-            reply = await analyze_video(pending_yt.url, text)
-            await send_message(sender, reply)
+            analysis = await analyze_video(pending_yt.url, text)
+            await _deliver_video_analysis(sender, analysis)
         return True
 
     # Webpage instruction
@@ -579,8 +581,8 @@ async def handle_chat(sender: str, text: str):
             clear_pending_video(sender)
             await send_message(sender, "⏳ Analisando vídeo...")
             await increment_stat(sender, "youtube")
-            reply = await analyze_video(youtube_url, instruction)
-            await send_message(sender, reply)
+            analysis = await analyze_video(youtube_url, instruction)
+            await _deliver_video_analysis(sender, analysis)
             return
 
         await _hydrate_pendings(sender)
@@ -620,15 +622,7 @@ async def handle_chat(sender: str, text: str):
                 scheduler=scheduler,
             )
 
-        if result.response_id:
-            await upsert_session(sender, result.response_id)
-        if result.image_bytes:
-            await send_image(sender, result.image_bytes)
-        if result.text:
-            await send_message(sender, result.text)
-        if result.tools_called:
-            for tool_name in result.tools_called:
-                await increment_stat(sender, f"tool_{tool_name}")
+        await _deliver_agent_result(sender, result)
 
     except Exception as e:
         log.exception("Agentic chat failed")
@@ -857,6 +851,32 @@ async def _deliver_agent_result(sender: str, result) -> None:
     if getattr(result, "tools_called", None):
         for tool_name in result.tools_called:
             await increment_stat(sender, f"tool_{tool_name}")
+        if "analyze_youtube_video" in result.tools_called:
+            pending = pop_pending_transcript(sender)
+            if pending:
+                await _send_analysis_document(sender, pending)
+
+
+async def _deliver_video_analysis(sender: str, analysis: VideoAnalysis) -> None:
+    await send_message(sender, analysis.text)
+    await _send_analysis_document(sender, analysis)
+
+
+async def _send_analysis_document(sender: str, analysis: VideoAnalysis) -> None:
+    if not analysis.download_token:
+        return
+    entry = get_download_entry(analysis.download_token)
+    if not entry or not entry.filepath.exists():
+        return
+    try:
+        await send_document(
+            sender,
+            entry.filepath.read_bytes(),
+            entry.filename,
+            entry.media_type or "text/plain",
+        )
+    except Exception:
+        log.exception("Failed to send transcript as WhatsApp document")
 
 
 async def _run_document_agent(sender: str, document_text: str, instruction: str | None) -> None:
@@ -946,6 +966,32 @@ async def send_message(to: str, text: str):
         log.info(f"Message sent to {to}: status={resp.status_code}")
         if resp.status_code != 200:
             log.error(f"Send failed: {resp.text}")
+
+
+async def send_document(to: str, file_bytes: bytes, filename: str, mime_type: str = "text/plain"):
+    """Uploads a document to Meta and sends it via WhatsApp Cloud API."""
+    upload_resp = await http_client.post(
+        f"{GRAPH_API_URL}/media",
+        data={"messaging_product": "whatsapp", "type": mime_type},
+        files={"file": (filename, file_bytes, mime_type)},
+    )
+    upload_resp.raise_for_status()
+    media_id = upload_resp.json()["id"]
+    log.info(f"Document uploaded: media_id={media_id} filename={filename}")
+
+    resp = await http_client.post(
+        f"{GRAPH_API_URL}/messages",
+        json={
+            "messaging_product": "whatsapp",
+            "to": to,
+            "type": "document",
+            "document": {"id": media_id, "filename": filename},
+        },
+    )
+    _last_reply_time[to] = time.time()
+    log.info(f"Document sent to {to}: status={resp.status_code}")
+    if resp.status_code != 200:
+        log.error(f"Document send failed: {resp.text}")
 
 
 async def send_image(to: str, image_bytes: bytes, caption: str = ""):

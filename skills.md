@@ -342,6 +342,12 @@ Aisha: O que você quer que eu faça com esse vídeo?
 "quais os timestamps mais importantes?"
 ```
 
+**Vídeo longo (> 25 min, ou > 80 MB se a duração não vier):**
+- A Aisha **não recusa** o vídeo
+- Entrega um **resumo** no chat
+- Envia a transcrição completa como **arquivo TXT** (anexo no WhatsApp + link temporário de 30 min)
+- Se não houver legendas, baixa o áudio e transcreve com Whisper
+
 **Observações:**
 - O link pendente expira após **10 minutos** sem instrução
 - Funciona apenas com vídeos públicos
@@ -477,7 +483,7 @@ A Aisha escolhe automaticamente o melhor modelo para cada tarefa — você não 
 | Extração de intenção de lembrete / tarefa | `gpt-5.6-luna` |
 | Execução de tarefa agendada (com web search) | `gpt-5.6-terra` |
 | Resumo de documentos PDF/DOCX e OCR | `gpt-5.6-terra` |
-| Análise de vídeo YouTube | `gemini-3.6-flash` (fallback: `gemini-2.5-flash`) |
+| Análise de vídeo YouTube | `gemini-3.6-flash` (fallback: `gemini-2.5-flash`); vídeo longo: legendas ou Whisper + TXT |
 | Leitura de páginas web | Jina Reader + `gpt-5.6-terra` |
 | Memória de longo prazo | `text-embedding-3-small` + tools `save_memory` / `forget_memory` |
 
