@@ -16,6 +16,7 @@ class PendingDocument:
     total_pages: int
     caption: str | None
     timestamp: float
+    needs_fetch: bool = False
 
 
 _pending: dict[str, PendingDocument] = {}
@@ -49,6 +50,19 @@ def store_pending_document(
     ))
 
 
+def mark_pending_document_meta(phone: str, payload: dict) -> None:
+    """Remember that a document is pending without downloading the blob."""
+    if phone in _pending:
+        return
+    _pending[phone] = PendingDocument(
+        pdf_bytes=b"",
+        total_pages=int(payload.get("total_pages") or 0),
+        caption=payload.get("caption"),
+        timestamp=time.monotonic(),
+        needs_fetch=True,
+    )
+
+
 def get_pending_document(phone: str) -> PendingDocument | None:
     entry = _pending.get(phone)
     if entry is not None:
@@ -62,10 +76,12 @@ def get_pending_document(phone: str) -> PendingDocument | None:
 
 async def get_pending_document_async(phone: str) -> PendingDocument | None:
     entry = get_pending_document(phone)
-    if entry:
+    if entry and not entry.needs_fetch:
         return entry
     row = await get_pending(phone, "document")
     if not row or not row.get("blob_b64"):
+        if entry and entry.needs_fetch:
+            _pending.pop(phone, None)
         return None
     payload = row.get("payload") or {}
     restored = PendingDocument(

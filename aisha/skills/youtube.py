@@ -103,10 +103,12 @@ def strip_youtube_url(text: str) -> str:
     return _YT_PATTERN.sub("", text).strip()
 
 
-def store_pending_video(phone: str, url: str) -> None:
+def store_pending_video(phone: str, url: str, persist: bool = True) -> None:
     import asyncio
     from aisha.skills.pending_store import upsert_pending
     _pending[phone] = PendingVideo(url=url)
+    if not persist:
+        return
     try:
         asyncio.get_running_loop().create_task(
             upsert_pending(phone, "youtube", {"url": url}, _PENDING_TTL_MINUTES * 60)

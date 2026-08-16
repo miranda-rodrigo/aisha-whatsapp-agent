@@ -29,7 +29,8 @@ from aisha.config import (
     WHATSAPP_APP_SECRET,
     WHATSAPP_TOKEN,
 )
-from aisha.messaging import split_whatsapp_text
+from aisha.messaging import split_whatsapp_text, typing_indicator_payload
+from aisha.supabase_http import aclose as aclose_supabase_client
 from aisha.models import EXTRACT_MODEL
 from aisha.routing import (
     contains_aisha as _contains_aisha,
@@ -40,7 +41,11 @@ from aisha.routing import (
     parse_page_selection as _parse_page_selection,
     strip_aisha as _strip_aisha,
 )
-from aisha.skills.pending_store import clear_all_pending, clear_pending, get_pending, upsert_pending
+from aisha.skills.pending_store import (
+    clear_all_pending,
+    list_active_pendings,
+    upsert_pending,
+)
 from aisha.skills.document import (
     extract_text_async,
     extract_scanned_pages,
@@ -53,12 +58,14 @@ from aisha.skills.document_state import (
     clear_pending_document,
     get_pending_document,
     get_pending_document_async,
+    mark_pending_document_meta,
     store_pending_document,
 )
 from aisha.skills.image_state import (
     clear_pending_image,
     get_pending_image,
     get_pending_image_async,
+    mark_pending_image_meta,
     store_pending_image,
 )
 from aisha.skills.refine import refine_transcription
@@ -204,16 +211,30 @@ async def lifespan(app: FastAPI):
         scheduler = sched
         await sched.start_in_background()
         log.info("APScheduler started")
-        restored = await restore_scheduled_jobs(sched)
-        log.info(f"Restored {restored} scheduled task(s)")
+
+        async def _restore_jobs():
+            try:
+                restored = await restore_scheduled_jobs(sched)
+                log.info(f"Restored {restored} scheduled task(s)")
+            except Exception:
+                log.exception("Failed to restore scheduled jobs")
+
+        _spawn(_restore_jobs())
         log.info("WhatsApp agent started")
         yield
 
     cleanup_task.cancel()
     await http_client.aclose()
+    await aclose_supabase_client()
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+@app.get("/health")
+async def health():
+    """Liveness probe for Railway / keep-alive. Does not wait on the scheduler."""
+    return {"status": "ok"}
 
 
 @app.get("/webhook")
@@ -315,12 +336,14 @@ async def _process_webhook(body: dict) -> None:
         log.info(f"Ignored: {sender} not in allowed list")
         return
 
+    _spawn(send_typing(msg_id))
+
     try:
         if msg_type == "audio":
             await handle_audio(sender, message)
         elif msg_type == "text":
             text = message.get("text", {}).get("body", "")
-            await handle_chat(sender, text)
+            await handle_chat(sender, text, msg_id)
         elif msg_type == "image":
             await handle_image(sender, message)
         elif msg_type == "document":
@@ -460,14 +483,14 @@ async def _execute_pending(sender: str, text: str) -> bool:
         return True
 
     # Scanned document — page selection
-    pending_doc = get_pending_document(sender)
+    pending_doc = await get_pending_document_async(sender)
     if pending_doc:
         log.info(f"Pending scanned PDF for {sender} — parsing page selection: {text[:60]}")
         await _process_document_pages(sender, text, pending_doc)
         return True
 
     # Image instruction
-    pending_img = get_pending_image(sender)
+    pending_img = await get_pending_image_async(sender)
     if pending_img:
         log.info(f"Pending image for {sender} — using text as instruction")
         await _process_image_instruction(sender, text, pending_img)
@@ -523,30 +546,45 @@ async def _execute_pending(sender: str, text: str) -> bool:
 
 
 async def _hydrate_pendings(sender: str) -> None:
-    """Restore pending image/document/timezone from Supabase after a redeploy."""
-    if sender not in _pending_timezone:
-        row = await get_pending(sender, "timezone")
-        if row:
-            original = (row.get("payload") or {}).get("reminder_text")
+    """Restore pending metadata from Supabase after a redeploy.
+
+    One request, no blobs. Image/PDF bytes are fetched only when the
+    pending action actually runs.
+    """
+    if (
+        sender in _pending_timezone
+        or get_pending_image(sender)
+        or get_pending_document(sender)
+        or get_pending_video(sender)
+        or get_pending_page(sender)
+    ):
+        return
+
+    rows = await list_active_pendings(sender)
+    for row in rows:
+        kind = row.get("kind")
+        payload = row.get("payload") or {}
+        if kind == "timezone":
+            original = payload.get("reminder_text")
             if original:
                 _pending_timezone[sender] = original
-    await get_pending_image_async(sender)
-    await get_pending_document_async(sender)
-    yt_row = await get_pending(sender, "youtube")
-    if yt_row and not get_pending_video(sender):
-        url = (yt_row.get("payload") or {}).get("url")
-        if url:
-            from aisha.skills.youtube import store_pending_video
-            store_pending_video(sender, url)
-    page_row = await get_pending(sender, "webpage")
-    if page_row and not get_pending_page(sender):
-        url = (page_row.get("payload") or {}).get("url")
-        if url:
-            from aisha.skills.webpage import store_pending_page
-            store_pending_page(sender, url)
+        elif kind == "image":
+            mark_pending_image_meta(sender, payload.get("mime_type", "image/jpeg"))
+        elif kind == "document":
+            mark_pending_document_meta(sender, payload)
+        elif kind == "youtube":
+            url = payload.get("url")
+            if url:
+                from aisha.skills.youtube import store_pending_video
+                store_pending_video(sender, url, persist=False)
+        elif kind == "webpage":
+            url = payload.get("url")
+            if url:
+                from aisha.skills.webpage import store_pending_page
+                store_pending_page(sender, url, persist=False)
 
 
-async def handle_chat(sender: str, text: str):
+async def handle_chat(sender: str, text: str, msg_id: str = ""):
     """Routes a text message through pending states or the agentic loop."""
     from aisha.agent import run_agent, run_fast_path
 
@@ -558,6 +596,7 @@ async def handle_chat(sender: str, text: str):
         )
         return
 
+    _processing.add(sender)
     try:
         if _is_retroactive_transcription_request(text):
             raw = await pop_raw_transcription_async(sender)
@@ -585,7 +624,14 @@ async def handle_chat(sender: str, text: str):
             await _deliver_video_analysis(sender, analysis)
             return
 
-        await _hydrate_pendings(sender)
+        ack_task = asyncio.create_task(send_message(sender, "⏳ Processando..."))
+        try:
+            await _hydrate_pendings(sender)
+        finally:
+            try:
+                await ack_task
+            except Exception:
+                log.warning("Failed to send processing ack", exc_info=True)
         pending_desc = _get_pending_description(sender)
         if pending_desc:
             decision = await classify_pending_response(text, pending_desc)
@@ -608,8 +654,8 @@ async def handle_chat(sender: str, text: str):
             await delete_session(sender)
             log.info(f"Session reset requested by {sender}")
 
-        _processing.add(sender)
-        await send_message(sender, "⏳ Processando...")
+        if msg_id:
+            _spawn(send_typing(msg_id))
         prev_id = await get_response_id(sender)
 
         if is_trivial_message(text):
@@ -650,6 +696,7 @@ async def handle_audio(sender: str, message: dict):
     """
     audio_id = message["audio"]["id"]
     log.info(f"Downloading audio {audio_id}")
+    await send_message(sender, "⏳ Processando áudio...")
 
     media_resp = await http_client.get(f"https://graph.facebook.com/v22.0/{audio_id}")
     media_resp.raise_for_status()
@@ -661,7 +708,6 @@ async def handle_audio(sender: str, message: dict):
     mime_type = message["audio"].get("mime_type", "audio/ogg")
 
     log.info(f"Audio downloaded: {len(audio_bytes)} bytes, mime={mime_type}")
-    await send_message(sender, "⏳ Processando áudio...")
     await increment_stat(sender, "audios")
 
     try:
@@ -669,7 +715,7 @@ async def handle_audio(sender: str, message: dict):
         log.info(f"Raw transcription: {len(raw_text)} chars")
 
         # Rule 1: pending image — use audio as instruction
-        pending = get_pending_image(sender)
+        pending = await get_pending_image_async(sender)
         if pending:
             log.info(f"Pending image found for {sender} — using audio as instruction")
             await _process_image_instruction(sender, raw_text, pending)
@@ -729,6 +775,7 @@ async def handle_image(sender: str, message: dict):
     image_id = message["image"]["id"]
     mime_type = message["image"].get("mime_type", "image/jpeg")
     log.info(f"Downloading image {image_id}")
+    await send_message(sender, "⏳ Processando imagem...")
 
     try:
         media_resp = await http_client.get(
@@ -761,7 +808,7 @@ async def handle_image(sender: str, message: dict):
         )
         pending = get_pending_image(sender)
         if pending:
-            await _process_image_instruction(sender, instruction, pending)
+            await _process_image_instruction(sender, instruction, pending, ack=False)
     except Exception as e:
         log.exception("Image handling failed")
         await send_message(sender, f"Erro ao processar imagem: {e}")
@@ -783,6 +830,8 @@ async def handle_document(sender: str, message: dict):
                 "Formatos aceitos: *PDF* e *Word (.docx)*",
             )
             return
+
+        await send_message(sender, "📄 Processando documento...")
 
         media_resp = await http_client.get(
             f"https://graph.facebook.com/v22.0/{doc_id}"
@@ -819,8 +868,6 @@ async def handle_document(sender: str, message: dict):
                     f"Exemplos: _\"páginas 1 a 5\"_, _\"página 3\"_, _\"páginas 2, 4 e 7\"_",
                 )
                 return
-
-        await send_message(sender, "📄 Processando documento...")
 
         document_text = await extract_text_async(doc_bytes, mime_type)
         log.info(f"Text extracted: {len(document_text)} chars from {filename}")
@@ -920,12 +967,13 @@ async def _process_document_pages(sender: str, text: str, pending):
     await _run_document_agent(sender, document_text, pending.caption)
 
 
-async def _process_image_instruction(sender: str, instruction: str, pending):
+async def _process_image_instruction(sender: str, instruction: str, pending, ack: bool = True):
     """Sends the pending image + instruction to the agent and delivers the result."""
     from aisha.agent import run_agent
 
     clear_pending_image(sender)
-    await send_message(sender, "⏳ Processando imagem...")
+    if ack:
+        await send_message(sender, "⏳ Processando imagem...")
 
     b64 = base64.b64encode(pending.image_bytes).decode()
     multimodal_input = [
@@ -948,6 +996,22 @@ async def _process_image_instruction(sender: str, instruction: str, pending):
         scheduler=scheduler,
     )
     await _deliver_agent_result(sender, result)
+
+
+async def send_typing(message_id: str) -> None:
+    """Marks the inbound message as read and shows the WhatsApp typing indicator."""
+    if not message_id:
+        return
+    try:
+        resp = await http_client.post(
+            f"{GRAPH_API_URL}/messages",
+            json=typing_indicator_payload(message_id),
+        )
+        log.info(f"Typing indicator sent: status={resp.status_code}")
+        if resp.status_code != 200:
+            log.warning(f"Typing indicator failed: {resp.text[:200]}")
+    except Exception:
+        log.warning("Failed to send typing indicator", exc_info=True)
 
 
 async def send_message(to: str, text: str):

@@ -5,18 +5,13 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 
-import httpx
-
-from aisha.config import SUPABASE_KEY, SUPABASE_URL
+from aisha.config import SUPABASE_URL
+from aisha.messaging import pending_list_params
+from aisha.supabase_http import HEADERS as _HEADERS
+from aisha.supabase_http import get_client
 
 log = logging.getLogger(__name__)
 
-_HEADERS = {
-    "apikey": SUPABASE_KEY,
-    "Authorization": f"Bearer {SUPABASE_KEY}",
-    "Content-Type": "application/json",
-    "Prefer": "return=representation",
-}
 _TABLE_URL = f"{SUPABASE_URL}/rest/v1/pending_states"
 _MAX_BLOB_CHARS = 2_000_000
 
@@ -40,32 +35,46 @@ async def upsert_pending(
         body["blob_b64"] = blob_b64
     elif blob_b64:
         log.warning(f"Pending {kind} blob too large to persist for {phone} ({len(blob_b64)} chars)")
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            _TABLE_URL,
-            headers={**_HEADERS, "Prefer": "resolution=merge-duplicates"},
-            json=body,
-        )
-        if resp.status_code not in (200, 201):
-            log.warning(f"Failed to persist pending {kind} for {phone}: {resp.status_code} {resp.text[:200]}")
-            return
+    client = get_client()
+    resp = await client.post(
+        _TABLE_URL,
+        headers={**_HEADERS, "Prefer": "resolution=merge-duplicates"},
+        json=body,
+    )
+    if resp.status_code not in (200, 201):
+        log.warning(f"Failed to persist pending {kind} for {phone}: {resp.status_code} {resp.text[:200]}")
+        return
     log.info(f"Pending {kind} persisted for {phone}")
 
 
+async def list_active_pendings(phone: str) -> list[dict]:
+    """Return active pending rows for a phone without downloading blobs."""
+    client = get_client()
+    resp = await client.get(
+        _TABLE_URL,
+        headers=_HEADERS,
+        params=pending_list_params(phone, datetime.now(timezone.utc).isoformat()),
+    )
+    if resp.status_code != 200:
+        log.warning(f"Failed to list pendings for {phone}: {resp.status_code}")
+        return []
+    return resp.json()
+
+
 async def get_pending(phone: str, kind: str) -> dict | None:
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            _TABLE_URL,
-            headers=_HEADERS,
-            params={
-                "phone": f"eq.{phone}",
-                "kind": f"eq.{kind}",
-                "select": "payload,blob_b64,expires_at",
-            },
-        )
-        if resp.status_code != 200:
-            return None
-        rows = resp.json()
+    client = get_client()
+    resp = await client.get(
+        _TABLE_URL,
+        headers=_HEADERS,
+        params={
+            "phone": f"eq.{phone}",
+            "kind": f"eq.{kind}",
+            "select": "payload,blob_b64,expires_at",
+        },
+    )
+    if resp.status_code != 200:
+        return None
+    rows = resp.json()
     if not rows:
         return None
     row = rows[0]
@@ -77,18 +86,18 @@ async def get_pending(phone: str, kind: str) -> dict | None:
 
 
 async def clear_pending(phone: str, kind: str) -> None:
-    async with httpx.AsyncClient() as client:
-        await client.delete(
-            _TABLE_URL,
-            headers=_HEADERS,
-            params={"phone": f"eq.{phone}", "kind": f"eq.{kind}"},
-        )
+    client = get_client()
+    await client.delete(
+        _TABLE_URL,
+        headers=_HEADERS,
+        params={"phone": f"eq.{phone}", "kind": f"eq.{kind}"},
+    )
 
 
 async def clear_all_pending(phone: str) -> None:
-    async with httpx.AsyncClient() as client:
-        await client.delete(
-            _TABLE_URL,
-            headers=_HEADERS,
-            params={"phone": f"eq.{phone}"},
-        )
+    client = get_client()
+    await client.delete(
+        _TABLE_URL,
+        headers=_HEADERS,
+        params={"phone": f"eq.{phone}"},
+    )

@@ -186,32 +186,45 @@ async def run_agent(
     from aisha.skills.memory_store import search_memories
     from datetime import datetime as _datetime
 
-    profile = await get_profile(phone) if phone else None
+    async def _load_profile():
+        return await get_profile(phone) if phone else None
+
+    async def _load_reminders():
+        if not phone:
+            return None
+        try:
+            return await get_reminders(phone)
+        except Exception:
+            log.warning("Failed to fetch active reminders for system prompt", exc_info=True)
+            return None
+
+    async def _load_memories():
+        if not phone or not isinstance(user_input, str):
+            return None
+        try:
+            return await search_memories(phone, user_input, limit=5)
+        except Exception:
+            log.warning("Failed to search memories for system prompt", exc_info=True)
+            return None
+
+    profile, reminder_rows, memories = await asyncio.gather(
+        _load_profile(),
+        _load_reminders(),
+        _load_memories(),
+    )
     user_tz = (profile or {}).get("timezone") or USER_TIMEZONE
 
     active_reminders: list[dict] | None = None
-    if phone:
-        try:
-            rows = await get_reminders(phone)
-            if rows:
-                active_reminders = []
-                for i, row in enumerate(rows, 1):
-                    dt_utc = _datetime.fromisoformat(row["scheduled_at"])
-                    active_reminders.append({
-                        "number": i,
-                        "message": row["message"],
-                        "datetime_display": _fmt_local(dt_utc, row.get("timezone") or user_tz),
-                        "is_recurring": row.get("is_recurring", False),
-                    })
-        except Exception:
-            log.warning("Failed to fetch active reminders for system prompt", exc_info=True)
-
-    memories: list[dict] | None = None
-    if phone and isinstance(user_input, str):
-        try:
-            memories = await search_memories(phone, user_input, limit=5)
-        except Exception:
-            log.warning("Failed to search memories for system prompt", exc_info=True)
+    if reminder_rows:
+        active_reminders = []
+        for i, row in enumerate(reminder_rows, 1):
+            dt_utc = _datetime.fromisoformat(row["scheduled_at"])
+            active_reminders.append({
+                "number": i,
+                "message": row["message"],
+                "datetime_display": _fmt_local(dt_utc, row.get("timezone") or user_tz),
+                "is_recurring": row.get("is_recurring", False),
+            })
 
     instructions = _build_system_prompt(profile, user_tz, active_reminders, memories)
 
