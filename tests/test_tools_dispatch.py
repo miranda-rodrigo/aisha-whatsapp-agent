@@ -35,6 +35,7 @@ class ToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             "forget_memory",
             "analyze_youtube_video",
             "download_video",
+            "search_x",
         ):
             self.assertIn(required, names)
 

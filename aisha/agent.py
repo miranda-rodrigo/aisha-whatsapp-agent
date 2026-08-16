@@ -72,7 +72,11 @@ def _build_system_prompt(
         "",
         "REGRAS DE USO DAS FERRAMENTAS:",
         "- Use o idioma do usuário (ou o idioma preferido dele, se configurado).",
-        "- Quando a resposta exigir informações atualizadas, use web_search.",
+        "- Quando a resposta exigir informações atualizadas da web (notícias, fatos, cotações), use web_search.",
+        "- Quando o usuário perguntar o que pessoas estão falando no X/Twitter, posts, tweets, "
+        "sentimento ou discussão na rede, use search_x — não web_search. "
+        "Pode usar as duas se precisar de posts E notícias. "
+        "No WhatsApp, entregue um briefing curto com links x.com simples (sem markdown [[1]]).",
         "- Quando o usuário pedir para gerar ou editar uma imagem, use image_generation.",
         "- Quando o usuário pedir um lembrete, verifique os LEMBRETES ATIVOS abaixo antes de agir:",
         "    * Se já existe um lembrete sobre o mesmo assunto/evento, use edit_reminder.",

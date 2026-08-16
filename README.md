@@ -73,6 +73,13 @@ Aisha é uma assistente pessoal orientada a tarefas que roda no WhatsApp Busines
 - O modelo decide quando usar com base no contexto
 - Exemplo: "Aisha, quem ganhou o Oscar de melhor filme?"
 
+### O que estão falando no X (Twitter)
+- Consulta posts públicos via xAI Grok (`x_search`) — não é scraping
+- Use quando quiser o que pessoas estão postando, não só notícias da web
+- Exemplos: "o que estão falando no X sobre o Pix?", "qual o clima no Twitter sobre a Copa?"
+- Combina com tarefa agendada: briefing diário do que o X está dizendo sobre um assunto
+- Requer `XAI_API_KEY`
+
 ### Geração de Imagem (gpt-image-1.5)
 - Disponível automaticamente nas conversas
 - O modelo decide quando usar com base no contexto
@@ -187,7 +194,7 @@ handle_chat (texto)
         ├── 2. saudação trivial? ──► gpt-5.6-luna (sem tools)
         └── 3. agente (gpt-5.6-terra)
                     └── loop de tools (até 10 iterações, em paralelo)
-                          ├── web_search / image_generation
+                          ├── web_search / search_x / image_generation
                           ├── lembretes e tarefas agendadas
                           ├── YouTube / webpage / download
                           └── memória (save / search / list / forget)
@@ -239,11 +246,12 @@ whatsapp-agent/
 | Transcrição | OpenAI Whisper (whisper-1) |
 | Geração/edição de imagem | image_generation (Responses API) |
 | Busca na web | Ferramenta nativa da Responses API |
+| Busca no X (Twitter) | xAI Grok `x_search` via tool `search_x` |
 | Memória de longo prazo | Embeddings text-embedding-3-small + tabela memories |
 | Conversão de áudio | ffmpeg |
 | Sessões / perfis / lembretes | Supabase (PostgreSQL) |
 | Lembretes (agendamento) | APScheduler 4.x async + SQLAlchemy |
-| Tarefas agendadas (execução) | APScheduler CronTrigger + gpt-5.6-terra + web_search |
+| Tarefas agendadas (execução) | APScheduler CronTrigger + agente (web_search e/ou search_x) |
 | Análise de vídeos YouTube | Google Gemini 3.6 Flash (fallback: 2.5 Flash) |
 | Leitura de páginas web | Jina Reader (r.jina.ai) |
 | HTTP client | httpx (async) |
@@ -256,6 +264,7 @@ whatsapp-agent/
 - Conta no [Meta for Developers](https://developers.facebook.com) com app WhatsApp configurado
 - Número de telefone registrado na WhatsApp Business API
 - Conta [OpenAI](https://platform.openai.com) com API key
+- Conta [xAI](https://console.x.ai) com API key (opcional — busca no X/Twitter)
 - Projeto no [Supabase](https://supabase.com)
 
 ### 2. Banco de dados (Supabase)
@@ -362,6 +371,7 @@ DATABASE_PASSWORD=sua_senha_do_banco
 USER_TIMEZONE=America/Sao_Paulo
 REMINDER_LEAD_MINUTES=15
 GEMINI_API_KEY=AIzaSy...
+XAI_API_KEY=xai-...
 WHATSAPP_APP_SECRET=app_secret_da_meta
 ```
 
@@ -378,6 +388,7 @@ WHATSAPP_APP_SECRET=app_secret_da_meta
 | `USER_TIMEZONE` | Timezone do usuário para lembretes (padrão: `America/Sao_Paulo`) |
 | `REMINDER_LEAD_MINUTES` | Minutos de antecedência para o aviso do lembrete (padrão: `15`) |
 | `GEMINI_API_KEY` | API key do Google AI Studio para análise de vídeos YouTube (opcional) |
+| `XAI_API_KEY` | API key da xAI (console.x.ai) para buscar o que pessoas estão falando no X (opcional) |
 | `WHATSAPP_APP_SECRET` | App Secret da Meta para validar `X-Hub-Signature-256`. Se vazio, a verificação é pulada. |
 | `PORT` | Porta do servidor (Railway injeta automaticamente; padrão: 8000) |
 
@@ -483,6 +494,7 @@ No painel de developers.facebook.com:
 | Google Gemini 3.6 Flash (refinamento / YouTube) | ~$0.001/msg |
 | OpenAI gpt-image-1.5 (imagem) | ~$0.02-0.08/imagem |
 | OpenAI web_search (busca) | ~$0.001/chamada |
+| xAI x_search (posts do X) | ~$0.005/chamada + tokens Grok |
 | OpenAI gpt-5.6-terra (tarefa agendada com web search) | ~$0.01-0.02/execução |
 | OpenAI embeddings (memória) | ~$0.00002/fato |
 | Jina Reader (páginas web) | Gratuito |
@@ -500,7 +512,7 @@ No painel de developers.facebook.com:
 - **Números brasileiros:** A Meta normaliza números BR removendo um dígito 9. Configure `ALLOWED_NUMBERS` com o formato que a Meta envia.
 - **Timezone:** O servidor roda em UTC (Railway). Lembretes usam `USER_TIMEZONE` para calcular horários relativos corretamente.
 - **PgBouncer:** O Supabase usa PgBouncer em modo transaction, que não suporta prepared statements. O engine é criado com `statement_cache_size=0` para evitar `DuplicatePreparedStatementError` na inicialização do APScheduler.
-- **Tarefas agendadas vs. lembretes:** Lembretes enviam texto fixo na hora agendada. Tarefas agendadas executam um prompt completo com `gpt-5.6-terra` + `web_search` a cada disparo, gerando conteúdo dinâmico. Ambos usam APScheduler com persistência no PostgreSQL.
+- **Tarefas agendadas vs. lembretes:** Lembretes enviam texto fixo na hora agendada. Tarefas agendadas executam o agente (web e/ou X) a cada disparo, gerando conteúdo dinâmico. Ambos usam APScheduler com persistência no PostgreSQL.
 - **Webhook assíncrono:** o POST `/webhook` valida a assinatura e devolve 200 imediatamente; o processamento roda em background para a Meta não reenviar por timeout. A primeira reação visível é o indicador de "digitando..." (mark-as-read + typing), disparado antes de hidratar estado ou chamar o LLM.
 - **GET `/health`:** probe de liveness. Útil como keep-alive no Railway para evitar cold start de ~20-30s na primeira mensagem do dia.
 - **Memória:** fatos duradouros vão para a tabela `memories` (embedding + busca por similaridade). O usuário pode listar e apagar.

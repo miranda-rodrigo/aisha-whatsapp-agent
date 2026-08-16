@@ -34,6 +34,7 @@ from aisha.tools.memory import (
     tool_list_memories,
     tool_forget_memory,
 )
+from aisha.tools.x_search import tool_search_x
 
 log = logging.getLogger(__name__)
 
@@ -164,8 +165,9 @@ TOOL_DEFINITIONS: list[dict] = [
         "name": "create_scheduled_task",
         "description": (
             "Create a recurring scheduled task that runs automatically on a cron schedule. "
-            "Each execution performs a web search and sends the AI-generated result to the user. "
-            "Use this for periodic reports, news summaries, market updates, etc."
+            "Each execution runs the agent (web search and X/Twitter search when relevant) "
+            "and sends the result to the user. "
+            "Use this for periodic reports, news summaries, market updates, X briefings, etc."
         ),
         "parameters": {
             "type": "object",
@@ -247,6 +249,56 @@ TOOL_DEFINITIONS: list[dict] = [
                 },
             },
             "required": ["url", "instruction"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "search_x",
+        "description": (
+            "Search what people are saying on X (Twitter) about a topic. "
+            "Use this INSTEAD of web_search when the user asks about posts, tweets, "
+            "sentiment, discussion, or 'o que estão falando' on X/Twitter. "
+            "web_search is for news and the open web; search_x is for live public posts. "
+            "You may call both when the user wants social conversation AND news coverage."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Natural-language topic or X advanced-search query, "
+                        "e.g. 'Pix no Brasil', 'bitcoin lang:pt', '@nubank reclamações'"
+                    ),
+                },
+                "handles": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional X usernames to search exclusively (max 20). "
+                        "Cannot be combined with exclude_handles."
+                    ),
+                },
+                "exclude_handles": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional X usernames to exclude (max 20).",
+                },
+                "from_date": {
+                    "type": "string",
+                    "description": "Start date inclusive, YYYY-MM-DD",
+                },
+                "to_date": {
+                    "type": "string",
+                    "description": "End date inclusive, YYYY-MM-DD",
+                },
+                "language": {
+                    "type": "string",
+                    "description": "Language for the briefing, e.g. 'português', 'english'",
+                },
+            },
+            "required": ["query"],
             "additionalProperties": False,
         },
     },
@@ -429,6 +481,7 @@ _DISPATCH = {
     "cancel_scheduled_task": tool_cancel_scheduled_task,
     "analyze_youtube_video": tool_analyze_youtube_video,
     "read_webpage": tool_read_webpage,
+    "search_x": tool_search_x,
     "download_video": tool_download_video,
     "set_personal_context": tool_set_personal_context,
     "set_language": tool_set_language,
