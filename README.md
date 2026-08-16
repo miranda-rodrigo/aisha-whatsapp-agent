@@ -342,6 +342,7 @@ CREATE TABLE pending_states (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (phone, kind)
 );
+CREATE INDEX idx_pending_states_phone_expires ON pending_states (phone, expires_at);
 ALTER TABLE pending_states DISABLE ROW LEVEL SECURITY;
 ```
 
