@@ -123,6 +123,8 @@ log = logging.getLogger(__name__)
 http_client: httpx.AsyncClient
 scheduler: AsyncScheduler
 _background_tasks: set[asyncio.Task] = set()
+LONG_TRANSCRIPTION_WORD_LIMIT = 500
+TRANSCRIPTION_PREVIEW_WORDS = 60
 
 
 def _spawn(coro) -> None:
@@ -679,7 +681,30 @@ async def handle_chat(sender: str, text: str, msg_id: str = ""):
 
 async def _send_refined_transcription(sender: str, raw_text: str) -> None:
     refined_text = await refine_transcription(raw_text)
-    log.info(f"Refined transcription: {len(refined_text)} chars")
+    words = refined_text.split()
+    word_count = len(words)
+    log.info(
+        f"Refined transcription: {len(refined_text)} chars, {word_count} words"
+    )
+
+    if word_count > LONG_TRANSCRIPTION_WORD_LIMIT:
+        preview = " ".join(words[:TRANSCRIPTION_PREVIEW_WORDS])
+        if word_count > TRANSCRIPTION_PREVIEW_WORDS:
+            preview += "…"
+        await send_message(
+            sender,
+            f"📝 Transcrição longa ({word_count} palavras).\n\n"
+            f"*Prévia:* {preview}\n\n"
+            "A transcrição completa está no arquivo .txt abaixo.",
+        )
+        await send_text_document(
+            sender,
+            refined_text,
+            filename="transcricao-aisha.txt",
+            caption="Transcrição completa",
+        )
+        return
+
     await send_message(sender, "📝 Transcrição:")
     await send_message(sender, refined_text)
 
@@ -1083,3 +1108,39 @@ async def send_image(to: str, image_bytes: bytes, caption: str = ""):
     log.info(f"Image sent to {to}: status={resp.status_code}")
     if resp.status_code != 200:
         log.error(f"Image send failed: {resp.text}")
+
+
+async def send_text_document(
+    to: str,
+    text: str,
+    filename: str = "transcricao.txt",
+    caption: str = "",
+):
+    """Uploads UTF-8 text and sends it as a WhatsApp document."""
+    text_bytes = text.encode("utf-8")
+    upload_resp = await http_client.post(
+        f"{GRAPH_API_URL}/media",
+        data={"messaging_product": "whatsapp", "type": "text/plain"},
+        files={"file": (filename, text_bytes, "text/plain")},
+    )
+    upload_resp.raise_for_status()
+    media_id = upload_resp.json()["id"]
+    log.info(f"Text document uploaded: media_id={media_id}, bytes={len(text_bytes)}")
+
+    document: dict = {"id": media_id, "filename": filename}
+    if caption:
+        document["caption"] = caption
+    resp = await http_client.post(
+        f"{GRAPH_API_URL}/messages",
+        json={
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to,
+            "type": "document",
+            "document": document,
+        },
+    )
+    _last_reply_time[to] = time.time()
+    log.info(f"Text document sent to {to}: status={resp.status_code}")
+    if resp.status_code != 200:
+        log.error(f"Text document send failed: {resp.text}")

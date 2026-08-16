@@ -105,7 +105,8 @@ class SearchXTests(unittest.IsolatedAsyncioTestCase):
         kwargs = mock_client.responses.create.await_args.kwargs
         self.assertEqual(kwargs["tools"][0]["type"], "x_search")
         self.assertIn("Pix", kwargs["input"])
-        self.assertEqual(kwargs["max_tool_calls"], 4)
+        self.assertEqual(kwargs["max_tool_calls"], 1)
+        self.assertEqual(kwargs["max_output_tokens"], 1024)
 
     async def test_markdown_citations_extracted(self):
         fake = _fake_response(

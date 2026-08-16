@@ -20,14 +20,14 @@ _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _MARKDOWN_CITE_RE = re.compile(r"\[\[\d+\]\]\((https?://[^)\s]+)\)")
 _MAX_HANDLES = 20
 _TIMEOUT_SECONDS = 180.0
-_MAX_OUTPUT_TOKENS = 2048
-_MAX_TOOL_CALLS = 4
+_MAX_OUTPUT_TOKENS = 1024
+_MAX_TOOL_CALLS = 1
 
 _GROK_INSTRUCTIONS = """\
 Você pesquisa o que pessoas estão dizendo no X (Twitter).
 Responda no idioma pedido pelo usuário (padrão: português brasileiro).
 Seja factual: só afirme o que os posts mostram. Não invente handles, likes nem posts.
-Inclua 3 a 8 citações de posts (links x.com) quando existirem.
+Inclua 3 a 5 citações de posts (links x.com) quando existirem.
 Estruture de forma compacta, adequada ao WhatsApp:
 1) panorama do que está sendo dito
 2) consenso e dissidência, se houver
