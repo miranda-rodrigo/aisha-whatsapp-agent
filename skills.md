@@ -342,7 +342,7 @@ Aisha: O que você quer que eu faça com esse vídeo?
 "quais os timestamps mais importantes?"
 ```
 
-**Vídeo longo (> 25 min, ou > 80 MB se a duração não vier):**
+**Vídeo longo (≥ 25 min, ou > 80 MB) — ou se você pedir TXT / transcrição completa:**
 - A Aisha **não recusa** o vídeo
 - Entrega um **resumo** no chat
 - Envia a transcrição completa como **arquivo TXT** (anexo no WhatsApp + link temporário de 30 min)
