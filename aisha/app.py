@@ -29,6 +29,7 @@ from aisha.config import (
     WHATSAPP_APP_SECRET,
     WHATSAPP_TOKEN,
 )
+from aisha.messaging import split_whatsapp_text
 from aisha.models import EXTRACT_MODEL
 from aisha.routing import (
     contains_aisha as _contains_aisha,
@@ -908,20 +909,21 @@ async def _process_image_instruction(sender: str, instruction: str, pending):
 
 
 async def send_message(to: str, text: str):
-    """Sends a text message via WhatsApp Cloud API."""
-    resp = await http_client.post(
-        f"{GRAPH_API_URL}/messages",
-        json={
-            "messaging_product": "whatsapp",
-            "to": to,
-            "type": "text",
-            "text": {"body": text},
-        },
-    )
-    _last_reply_time[to] = time.time()
-    log.info(f"Message sent to {to}: status={resp.status_code}")
-    if resp.status_code != 200:
-        log.error(f"Send failed: {resp.text}")
+    """Sends a text message via WhatsApp Cloud API, dividindo se passar de 4096 chars."""
+    for chunk in split_whatsapp_text(text):
+        resp = await http_client.post(
+            f"{GRAPH_API_URL}/messages",
+            json={
+                "messaging_product": "whatsapp",
+                "to": to,
+                "type": "text",
+                "text": {"body": chunk},
+            },
+        )
+        _last_reply_time[to] = time.time()
+        log.info(f"Message sent to {to}: status={resp.status_code}")
+        if resp.status_code != 200:
+            log.error(f"Send failed: {resp.text}")
 
 
 async def send_image(to: str, image_bytes: bytes, caption: str = ""):

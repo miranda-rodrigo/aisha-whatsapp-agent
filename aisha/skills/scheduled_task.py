@@ -25,6 +25,7 @@ from aisha.config import (
     USER_TIMEZONE,
     WHATSAPP_TOKEN,
 )
+from aisha.messaging import split_whatsapp_text
 from aisha.models import AGENT_MODEL, EXTRACT_MODEL
 from aisha.skills.scheduled_task_store import (
     ScheduledTask,
@@ -218,15 +219,16 @@ async def _send_whatsapp(phone: str, message: str) -> None:
         headers={"Authorization": f"Bearer {WHATSAPP_TOKEN}"},
         timeout=30.0,
     ) as client:
-        await client.post(
-            f"{GRAPH_API_URL}/messages",
-            json={
-                "messaging_product": "whatsapp",
-                "to": phone,
-                "type": "text",
-                "text": {"body": message},
-            },
-        )
+        for chunk in split_whatsapp_text(message):
+            await client.post(
+                f"{GRAPH_API_URL}/messages",
+                json={
+                    "messaging_product": "whatsapp",
+                    "to": phone,
+                    "type": "text",
+                    "text": {"body": chunk},
+                },
+            )
 
 
 async def _execute_task(phone: str, task_id: str, name: str, prompt: str) -> None:
