@@ -15,6 +15,7 @@ class PendingImage:
     image_bytes: bytes
     mime_type: str
     timestamp: float
+    needs_fetch: bool = False
 
 
 _pending: dict[str, PendingImage] = {}
@@ -42,6 +43,18 @@ def store_pending_image(phone: str, image_bytes: bytes, mime_type: str) -> None:
     ))
 
 
+def mark_pending_image_meta(phone: str, mime_type: str) -> None:
+    """Remember that an image is pending without downloading the blob."""
+    if phone in _pending:
+        return
+    _pending[phone] = PendingImage(
+        image_bytes=b"",
+        mime_type=mime_type,
+        timestamp=time.monotonic(),
+        needs_fetch=True,
+    )
+
+
 def get_pending_image(phone: str) -> PendingImage | None:
     entry = _pending.get(phone)
     if entry is not None:
@@ -55,10 +68,12 @@ def get_pending_image(phone: str) -> PendingImage | None:
 
 async def get_pending_image_async(phone: str) -> PendingImage | None:
     entry = get_pending_image(phone)
-    if entry:
+    if entry and not entry.needs_fetch:
         return entry
     row = await get_pending(phone, "image")
     if not row or not row.get("blob_b64"):
+        if entry and entry.needs_fetch:
+            _pending.pop(phone, None)
         return None
     image_bytes = base64.b64decode(row["blob_b64"])
     mime_type = (row.get("payload") or {}).get("mime_type", "image/jpeg")

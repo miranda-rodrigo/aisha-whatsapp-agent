@@ -1,6 +1,11 @@
 import unittest
 
-from aisha.messaging import WHATSAPP_TEXT_LIMIT, split_whatsapp_text
+from aisha.messaging import (
+    WHATSAPP_TEXT_LIMIT,
+    pending_list_params,
+    split_whatsapp_text,
+    typing_indicator_payload,
+)
 
 
 class SplitWhatsappTextTests(unittest.TestCase):
@@ -40,6 +45,24 @@ class SplitWhatsappTextTests(unittest.TestCase):
         for chunk in chunks:
             self.assertLessEqual(len(chunk), WHATSAPP_TEXT_LIMIT)
         self.assertEqual("".join(chunks), text)
+
+
+class TypingIndicatorTests(unittest.TestCase):
+    def test_payload_marks_read_and_shows_typing(self):
+        payload = typing_indicator_payload("wamid.abc")
+        self.assertEqual(payload["messaging_product"], "whatsapp")
+        self.assertEqual(payload["status"], "read")
+        self.assertEqual(payload["message_id"], "wamid.abc")
+        self.assertEqual(payload["typing_indicator"], {"type": "text"})
+
+
+class PendingListParamsTests(unittest.TestCase):
+    def test_does_not_select_blobs(self):
+        params = pending_list_params("5511999999999", "2026-08-16T11:00:00+00:00")
+        self.assertEqual(params["phone"], "eq.5511999999999")
+        self.assertEqual(params["expires_at"], "gt.2026-08-16T11:00:00+00:00")
+        self.assertEqual(params["select"], "kind,payload,expires_at")
+        self.assertNotIn("blob_b64", params["select"])
 
 
 if __name__ == "__main__":

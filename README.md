@@ -45,7 +45,7 @@ Aisha é uma assistente pessoal orientada a tarefas que roda no WhatsApp Busines
 - Responde de forma natural no idioma do usuário
 - Mantém contexto da conversa por até 10 minutos de inatividade
 - Para iniciar um novo assunto, diga: "nova conversa", "novo assunto", "mudar de assunto" ou "reset"
-- Feedback imediato: envia "⏳ Processando..." assim que recebe a mensagem, antes de iniciar o processamento
+- Feedback imediato: marca a mensagem como lida e mostra "digitando..." assim que o webhook chega; em seguida envia "⏳ Processando..." em paralelo com a hidratação de estado, antes do agente
 - Se o usuário enviar outra mensagem enquanto a anterior ainda está sendo processada, a Aisha avisa que está ocupada e pede para aguardar
 
 ### Personalização e Perfil
@@ -212,6 +212,7 @@ whatsapp-agent/
 │   ├── models.py               # IDs canônicos dos modelos
 │   ├── routing.py              # Helpers puros de roteamento (testáveis)
 │   ├── config.py               # Variáveis de ambiente
+│   ├── supabase_http.py        # Cliente HTTP compartilhado para o Supabase
 │   ├── session.py              # Sessões no Supabase (TTL 10min)
 │   ├── user_profile.py         # Perfis (contexto, idioma, stats)
 │   ├── tools/                  # Wrappers de tools do agente
@@ -498,8 +499,9 @@ No painel de developers.facebook.com:
 - **Timezone:** O servidor roda em UTC (Railway). Lembretes usam `USER_TIMEZONE` para calcular horários relativos corretamente.
 - **PgBouncer:** O Supabase usa PgBouncer em modo transaction, que não suporta prepared statements. O engine é criado com `statement_cache_size=0` para evitar `DuplicatePreparedStatementError` na inicialização do APScheduler.
 - **Tarefas agendadas vs. lembretes:** Lembretes enviam texto fixo na hora agendada. Tarefas agendadas executam um prompt completo com `gpt-5.6-terra` + `web_search` a cada disparo, gerando conteúdo dinâmico. Ambos usam APScheduler com persistência no PostgreSQL.
-- **Webhook assíncrono:** o POST `/webhook` valida a assinatura e devolve 200 imediatamente; o processamento roda em background para a Meta não reenviar por timeout.
+- **Webhook assíncrono:** o POST `/webhook` valida a assinatura e devolve 200 imediatamente; o processamento roda em background para a Meta não reenviar por timeout. A primeira reação visível é o indicador de "digitando..." (mark-as-read + typing), disparado antes de hidratar estado ou chamar o LLM.
+- **GET `/health`:** probe de liveness. Útil como keep-alive no Railway para evitar cold start de ~20-30s na primeira mensagem do dia.
 - **Memória:** fatos duradouros vão para a tabela `memories` (embedding + busca por similaridade). O usuário pode listar e apagar.
-- **Restauração de jobs:** No startup do servidor, todos os jobs de tarefas agendadas são restaurados do banco para o scheduler. Isso garante que tarefas sobrevivam redeploys.
+- **Restauração de jobs:** No startup, o servidor começa a aceitar webhooks assim que o APScheduler sobe; a restauração das tarefas agendadas roda em background para não atrasar a primeira mensagem após um deploy/cold start.
 - **Logs:** Se a pasta `logs/` existir na raiz do projeto, o app escreve em `logs/aisha.log` com rotação automática (5 MB × 3 arquivos). Caso contrário, só imprime no stdout.
 - **Anti-duplicata de lembretes:** A cada chamada ao agente, os lembretes ativos do usuário são buscados no Supabase e injetados no `instructions` do modelo. Isso permite que o modelo use `edit_reminder` em follow-ups (ex: "inclua o endereço no lembrete") ao invés de criar um segundo lembrete sobre o mesmo evento.

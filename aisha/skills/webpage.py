@@ -54,10 +54,12 @@ def _is_youtube(url: str) -> bool:
     return bool(re.search(r"youtube\.com|youtu\.be", url, re.IGNORECASE))
 
 
-def store_pending_page(phone: str, url: str) -> None:
+def store_pending_page(phone: str, url: str, persist: bool = True) -> None:
     import asyncio
     from aisha.skills.pending_store import upsert_pending
     _pending[phone] = PendingPage(url=url)
+    if not persist:
+        return
     try:
         asyncio.get_running_loop().create_task(
             upsert_pending(phone, "webpage", {"url": url}, _PENDING_TTL_MINUTES * 60)
