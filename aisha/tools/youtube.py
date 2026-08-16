@@ -13,7 +13,7 @@ log = logging.getLogger(__name__)
 
 
 async def tool_analyze_youtube_video(args: dict, ctx: ToolContext) -> str:
-    from aisha.skills.youtube import analyze_video
+    from aisha.skills.youtube import analyze_video, store_pending_transcript
 
     url = args.get("url")
     instruction = args.get("instruction", "")
@@ -22,4 +22,15 @@ async def tool_analyze_youtube_video(args: dict, ctx: ToolContext) -> str:
         return json.dumps({"error": "URL do YouTube é obrigatória."})
 
     result = await analyze_video(url, instruction)
-    return json.dumps({"analysis": result})
+    if result.download_token:
+        store_pending_transcript(ctx.phone, result)
+    payload = {"analysis": result.text}
+    if result.download_link:
+        payload["download_link"] = result.download_link
+        payload["filename"] = result.filename
+        payload["is_long_video"] = result.is_long
+        payload["note"] = (
+            "A transcrição completa já está no arquivo TXT. "
+            "Encaminhe o resumo e o link. Não omita o download_link."
+        )
+    return json.dumps(payload)

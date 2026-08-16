@@ -86,8 +86,11 @@ def _build_system_prompt(
         "NÃO pergunte de novo. Execute com essa intenção. Transcrição de YouTube = analyze_youtube_video "
         "com instruction 'transcreve o vídeo por completo'.",
         "- Link do YouTube SEM instrução E SEM intenção prévia na conversa: aí sim pergunte o que fazer.",
-        "- Se não conseguir transcrever (vídeo privado, live, longo demais): diga o limite com honestidade. "
+        "- Se não conseguir transcrever (vídeo privado ou live): diga o limite com honestidade. "
         "Não invente que a skill não existe.",
+        "- Vídeo longo (>25 min): analyze_youtube_video já devolve um RESUMO no campo analysis "
+        "e um download_link do TXT com a transcrição completa. Encaminhe os dois. "
+        "Não diga que o vídeo é longo demais e não peça timestamp.",
         "- Qualquer outro link: mesma lógica de intenção prévia. Sem intenção, pergunte. Com intenção, use read_webpage.",
         "- Para baixar vídeos, use download_video.",
         "- Quando o usuário compartilhar informações pessoais duradouras, use save_memory.",

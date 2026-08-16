@@ -22,7 +22,9 @@ MIME_TO_EXT = {
     "audio/mp4": ".m4a",
     "audio/wav": ".wav",
     "audio/x-wav": ".wav",
+    "audio/webm": ".webm",
     "video/mp4": ".mp4",
+    "video/webm": ".webm",
 }
 
 

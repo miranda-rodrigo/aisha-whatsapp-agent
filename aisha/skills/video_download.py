@@ -34,6 +34,7 @@ _TWITTER_PATTERN = re.compile(
 class DownloadEntry:
     filepath: Path
     filename: str
+    media_type: str = "video/mp4"
     created_at: datetime = field(default_factory=datetime.utcnow)
 
 
@@ -129,8 +130,35 @@ async def download_video(url: str) -> tuple[str, str]:
     # Sanitize filename for use in Content-Disposition
     filename = re.sub(r'[\\/*?:"<>|]', "_", filename)
 
-    _downloads[token] = DownloadEntry(filepath=filepath, filename=filename)
+    _downloads[token] = DownloadEntry(
+        filepath=filepath, filename=filename, media_type="video/mp4"
+    )
     log.info(f"Video downloaded: {filepath} ({filepath.stat().st_size} bytes), token={token}")
+    return token, filename
+
+
+def register_text_download(content: str, filename: str) -> tuple[str, str]:
+    """Write a UTF-8 text file and register a temporary download token.
+
+    Returns (token, sanitized_filename).
+    """
+    tmp_dir = Path(tempfile.gettempdir()) / "aisha_downloads"
+    tmp_dir.mkdir(exist_ok=True)
+
+    token = secrets.token_urlsafe(16)
+    filepath = tmp_dir / f"{token}.txt"
+    filepath.write_text(content, encoding="utf-8")
+
+    filename = re.sub(r'[\\/*?:"<>|]', "_", filename).strip() or "transcricao.txt"
+    if not filename.lower().endswith(".txt"):
+        filename = f"{filename}.txt"
+
+    _downloads[token] = DownloadEntry(
+        filepath=filepath,
+        filename=filename,
+        media_type="text/plain",
+    )
+    log.info(f"Text file registered: {filepath} ({filepath.stat().st_size} bytes), token={token}")
     return token, filename
 
 
