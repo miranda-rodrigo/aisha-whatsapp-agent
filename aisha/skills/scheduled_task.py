@@ -1,7 +1,8 @@
 """Scheduled task skill: create, list, edit and cancel recurring agent actions.
 
 Unlike reminders (which send a fixed text), scheduled tasks execute an
-agent prompt with web_search enabled and send the AI-generated result.
+agent prompt (web search and X/Twitter search when relevant) and send
+the AI-generated result.
 Example: "toda segunda me mande um relatório sobre notícias do Irã".
 """
 
@@ -26,7 +27,7 @@ from aisha.config import (
     WHATSAPP_TOKEN,
 )
 from aisha.messaging import split_whatsapp_text
-from aisha.models import AGENT_MODEL, EXTRACT_MODEL
+from aisha.models import EXTRACT_MODEL
 from aisha.skills.scheduled_task_store import (
     ScheduledTask,
     deactivate_task,
@@ -235,29 +236,18 @@ async def _execute_task(phone: str, task_id: str, name: str, prompt: str) -> Non
     """Called by APScheduler: runs the prompt through the agent and sends the result."""
     log.info(f"Executing scheduled task '{name}' (id={task_id}) for {phone}")
     try:
-        response = await _client.responses.create(
-            model=AGENT_MODEL,
-            instructions=(
-                "Você é Aisha, uma assistente pessoal. Execute a tarefa abaixo e "
-                "retorne o resultado de forma clara, organizada e em português. "
-                "Use a busca web para obter informações atualizadas."
-            ),
-            input=prompt,
-            tools=[{"type": "web_search"}],
-            background=True,
-        )
-        while getattr(response, "status", None) in ("queued", "in_progress"):
-            await asyncio.sleep(2)
-            response = await _client.responses.retrieve(response.id)
+        from aisha.agent import run_agent
 
-        text_parts = [
-            content.text
-            for item in response.output
-            if item.type == "message"
-            for content in item.content
-            if content.type == "output_text"
-        ]
-        result_text = "\n".join(text_parts) if text_parts else "Não consegui gerar o relatório desta vez."
+        result = await run_agent(
+            (
+                f"Tarefa agendada '{name}'. Execute só o relatório pedido. "
+                "Não crie lembretes, tarefas, memórias nem imagens. "
+                "Se o assunto for discussão no X/Twitter, use search_x.\n\n"
+                f"{prompt}"
+            ),
+            phone=phone,
+        )
+        result_text = (result.text or "").strip() or "Não consegui gerar o relatório desta vez."
 
         await _send_whatsapp(phone, f"📋 *{name}*\n\n{result_text}")
         log.info(f"Scheduled task '{name}' executed successfully for {phone}")

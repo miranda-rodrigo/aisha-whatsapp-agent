@@ -67,17 +67,26 @@ A palavra "Aisha" em qualquer parte do áudio indica que é uma conversa, não u
 
 ---
 
-## 4. Busca na Web
+## 4. Busca na Web e no X
 
 A Aisha busca informações atualizadas automaticamente quando precisa. Não é necessário nenhum comando — ela decide sozinha quando usar.
 
-**Como usar:**
+**Web** — notícias, fatos, cotações:
 ```
 Você: quem ganhou o Oscar de melhor filme esse ano?
 Você: qual o dólar hoje?
 Você: últimas notícias sobre o mercado financeiro
 Você: qual o resultado do jogo do Flamengo ontem?
 ```
+
+**X (Twitter)** — o que as pessoas estão postando sobre um assunto:
+```
+Você: o que estão falando no X sobre o Pix?
+Você: qual o clima no Twitter sobre a Copa?
+Você: o que o @nubank está postando essa semana?
+```
+
+Dá para agendar: *"todo dia às 8h me manda o que o X está falando sobre bitcoin"*.
 
 ---
 
@@ -297,8 +306,8 @@ Cada vez que disparar, vou executar essa tarefa com busca na web e te enviar o r
 ```
 
 **Observações:**
-- Cada execução usa busca na web para informações atualizadas
-- O modelo GPT-5.4 gera o relatório — mesma qualidade de uma conversa complexa
+- Cada execução usa o agente (busca na web e, se o assunto for o X, busca de posts)
+- O modelo gera o relatório — mesma qualidade de uma conversa complexa
 - Tarefas sobrevivem reinicializações do servidor (persistidas no banco)
 
 ---
@@ -481,7 +490,8 @@ A Aisha escolhe automaticamente o melhor modelo para cada tarefa — você não 
 | Transcrição de áudio | `whisper-1` |
 | Refinamento de transcrição | `gemini-3.6-flash` (fallback: `gemini-2.5-flash`) |
 | Extração de intenção de lembrete / tarefa | `gpt-5.6-luna` |
-| Execução de tarefa agendada (com web search) | `gpt-5.6-terra` |
+| Execução de tarefa agendada (web e/ou X) | `gpt-5.6-terra` + `search_x` quando o assunto é o X |
+| O que estão falando no X | Grok (`x_search`) via tool `search_x` |
 | Resumo de documentos PDF/DOCX e OCR | `gpt-5.6-terra` |
 | Análise de vídeo YouTube | `gemini-3.6-flash` (fallback: `gemini-2.5-flash`); vídeo longo: legendas ou Whisper + TXT |
 | Leitura de páginas web | Jina Reader + `gpt-5.6-terra` |
