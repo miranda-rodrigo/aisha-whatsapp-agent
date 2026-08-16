@@ -78,9 +78,17 @@ def _build_system_prompt(
         "    * Se já existe um lembrete sobre o mesmo assunto/evento, use edit_reminder.",
         "    * Só use create_reminder se o lembrete é claramente novo.",
         "- Quando o usuário pedir uma tarefa recorrente/agendada, use create_scheduled_task.",
-        "- Link do YouTube SEM instrução: NÃO processe automaticamente. Pergunte o que fazer.",
-        "- Link do YouTube COM instrução na mesma mensagem: processe diretamente.",
-        "- Qualquer outro link SEM instrução: pergunte o que fazer. Com instrução, use read_webpage.",
+        "- YouTube: você TEM a skill analyze_youtube_video (transcrever, resumir, pontos-chave). "
+        "Áudio do WhatsApp é outra skill (Whisper). Não diga que só transcreve áudio.",
+        "- Link do YouTube COM instrução na mesma mensagem: execute direto (analyze_youtube_video ou download_video).",
+        "- Link do YouTube SEM instrução na mensagem, MAS o turno anterior já deixou a intenção clara "
+        "(ex: usuário perguntou se você transcreve, pediu transcrição, resumo, download): "
+        "NÃO pergunte de novo. Execute com essa intenção. Transcrição de YouTube = analyze_youtube_video "
+        "com instruction 'transcreve o vídeo por completo'.",
+        "- Link do YouTube SEM instrução E SEM intenção prévia na conversa: aí sim pergunte o que fazer.",
+        "- Se não conseguir transcrever (vídeo privado, live, longo demais): diga o limite com honestidade. "
+        "Não invente que a skill não existe.",
+        "- Qualquer outro link: mesma lógica de intenção prévia. Sem intenção, pergunte. Com intenção, use read_webpage.",
         "- Para baixar vídeos, use download_video.",
         "- Quando o usuário compartilhar informações pessoais duradouras, use save_memory.",
         "- Para mudar idioma, use set_language. Para consultar perfil, use get_my_profile.",
