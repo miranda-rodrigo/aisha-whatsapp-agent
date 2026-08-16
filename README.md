@@ -100,8 +100,8 @@ Aisha é uma assistente pessoal orientada a tarefas que roda no WhatsApp Busines
 ### Análise de Vídeos do YouTube (Gemini 2.5 Flash)
 - Envie qualquer link do YouTube e a Aisha analisa o vídeo diretamente
 - Pode enviar o link com instrução na mesma mensagem, ou só o link e a Aisha pergunta o que fazer
-- Vídeos curtos (até 25 min) são analisados direto pelo Gemini
-- Vídeos longos (> 25 min, ou > 80 MB se a duração não vier): resumo no chat + transcrição completa em TXT para download
+- Vídeos curtos (menos de 25 min e ≤ 80 MB) são analisados direto pelo Gemini
+- Vídeos longos (≥ 25 min, ou > 80 MB) — ou pedido explícito de TXT: resumo no chat + transcrição completa em TXT para download
 - Exemplos de uso: resumo, transcrição, pontos principais, post para LinkedIn, perguntas sobre o conteúdo
 
 ### Leitura de Páginas Web (Jina Reader)

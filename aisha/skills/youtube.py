@@ -1,8 +1,9 @@
 """YouTube video analysis skill using Gemini, with a long-video fallback.
 
-Short videos go to Gemini via YouTube URI. Videos longer than 25 minutes
-(or ~80 MB when duration is unknown) are transcribed from captions or
-Whisper, then the chat gets a summary and the full text as a downloadable TXT.
+Short videos go to Gemini via YouTube URI. Videos of 25 minutes or more,
+or larger than ~80 MB, are transcribed from captions or Whisper. The chat
+gets a summary and the full text as a downloadable TXT. The same happens
+when the user explicitly asks for a TXT / transcrição completa.
 """
 
 import asyncio
@@ -22,9 +23,9 @@ _MODEL = GEMINI_PRIMARY
 _FALLBACK_MODEL = GEMINI_FALLBACK
 _client = None
 
-# Spoken video past ~25 min produces a transcript too large for a good WhatsApp
-# thread, and Gemini video tokens climb quickly after that. 80 MB is the
-# fallback when yt-dlp does not report duration (~3–4 MB/min at 720p).
+# Spoken video at 25 min already overflows a WhatsApp thread. 80 MB catches
+# high-quality encodes even when duration is slightly under 25 min
+# (YouTube 1080p/4K mp4 is often 150–200 MB for a 25 min talk).
 LONG_VIDEO_SECONDS = 25 * 60
 LONG_VIDEO_BYTES = 80 * 1024 * 1024
 DOWNLOAD_TTL_MINUTES = 30
@@ -35,6 +36,12 @@ _YT_PATTERN = re.compile(
 )
 _TRANSCRIPT_INTENT_RE = re.compile(
     r"transcrev|transcri|transcript|legend",
+    re.IGNORECASE,
+)
+_TXT_FILE_RE = re.compile(
+    r"\btxt\b|\.txt\b|arquivo\s+txt|"
+    r"transcri[cç][aã]o\s+completa|"
+    r"v[ií]deo\s+[eé]\s+longo|muito\s+longo",
     re.IGNORECASE,
 )
 _TS_RE = re.compile(
@@ -148,12 +155,29 @@ def pop_pending_transcript(phone: str) -> VideoAnalysis | None:
 
 
 def is_long_video(duration: float | None, filesize: int | None) -> bool:
-    """True when the video should use the summary + TXT delivery path."""
-    if duration is not None:
-        return duration > LONG_VIDEO_SECONDS
-    if filesize is not None:
-        return filesize > LONG_VIDEO_BYTES
+    """True when the video should use the summary + TXT delivery path.
+
+    25 min is inclusive. Filesize is an independent signal — a 25 min
+    1080p/4K file is often ~180 MB even if yt-dlp duration is 24:59.
+    """
+    if duration is not None and duration >= LONG_VIDEO_SECONDS:
+        return True
+    if filesize is not None and filesize > LONG_VIDEO_BYTES:
+        return True
     return False
+
+
+def wants_transcript_file(instruction: str) -> bool:
+    """True when the user asked for a TXT / full transcript file."""
+    return bool(_TXT_FILE_RE.search(instruction or ""))
+
+
+def should_deliver_as_file(
+    instruction: str,
+    duration: float | None,
+    filesize: int | None,
+) -> bool:
+    return is_long_video(duration, filesize) or wants_transcript_file(instruction)
 
 
 def is_transcript_instruction(instruction: str) -> bool:
@@ -189,11 +213,12 @@ def _safe_filename(title: str | None) -> str:
 
 
 def _best_filesize(info: dict) -> int | None:
+    """Largest reported size across the selected format and all variants."""
+    sizes: list[int] = []
     for key in ("filesize", "filesize_approx"):
         value = info.get(key)
         if value:
-            return int(value)
-    sizes: list[int] = []
+            sizes.append(int(value))
     for fmt in info.get("formats") or []:
         value = fmt.get("filesize") or fmt.get("filesize_approx")
         if value:
@@ -442,14 +467,13 @@ async def analyze_video(url: str, instruction: str) -> VideoAnalysis:
     from google.genai.errors import ClientError  # local import — optional in unit tests
 
     meta = await _probe_video(url)
-    long_video = is_long_video(
-        meta.duration if meta else None,
-        meta.filesize if meta else None,
-    )
-    if long_video:
+    duration = meta.duration if meta else None
+    filesize = meta.filesize if meta else None
+    use_file = should_deliver_as_file(instruction, duration, filesize)
+    if use_file:
         log.info(
-            f"Long video detected (duration={meta.duration if meta else None}, "
-            f"filesize={meta.filesize if meta else None}) — summary + TXT"
+            f"TXT delivery (duration={duration}, filesize={filesize}, "
+            f"wants_file={wants_transcript_file(instruction)}) — summary + TXT"
         )
         try:
             return await _analyze_via_transcript(url, instruction, meta)
@@ -465,6 +489,14 @@ async def analyze_video(url: str, instruction: str) -> VideoAnalysis:
     try:
         try:
             text = await _analyze_via_gemini(url, instruction)
+            if is_transcript_instruction(instruction) and text and len(text) > 8000:
+                summary = await _summarize_transcript(text, instruction)
+                return _with_download(
+                    summary,
+                    text,
+                    meta.title if meta else None,
+                    duration,
+                )
             return VideoAnalysis(text=text)
         except Exception as primary_exc:
             if _is_token_limit_error(primary_exc):

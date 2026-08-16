@@ -14,29 +14,33 @@ from aisha.skills.youtube import (
     LONG_VIDEO_BYTES,
     LONG_VIDEO_SECONDS,
     VideoAnalysis,
+    _best_filesize,
     _safe_filename,
     format_long_video_reply,
     is_long_video,
     is_transcript_instruction,
     parse_caption_text,
     pop_pending_transcript,
+    should_deliver_as_file,
     store_pending_transcript,
+    wants_transcript_file,
 )
 
 
 class LongVideoThresholdTests(unittest.TestCase):
-    def test_short_duration_is_not_long(self):
+    def test_under_25_min_without_large_file_is_not_long(self):
         self.assertFalse(is_long_video(24 * 60, None))
-        self.assertFalse(is_long_video(25 * 60, None))
+        self.assertFalse(is_long_video(24 * 60, LONG_VIDEO_BYTES))
 
-    def test_duration_just_over_25_min_is_long(self):
+    def test_exactly_25_min_is_long(self):
+        self.assertTrue(is_long_video(25 * 60, None))
         self.assertTrue(is_long_video(25 * 60 + 1, None))
-        self.assertTrue(is_long_video(90 * 60, 10_000))
 
-    def test_duration_wins_over_large_filesize(self):
-        self.assertFalse(is_long_video(10 * 60, LONG_VIDEO_BYTES * 3))
+    def test_filesize_triggers_even_when_duration_is_known(self):
+        self.assertTrue(is_long_video(10 * 60, LONG_VIDEO_BYTES + 1))
+        self.assertTrue(is_long_video(25 * 60, 180 * 1024 * 1024))
 
-    def test_filesize_used_only_when_duration_missing(self):
+    def test_filesize_when_duration_missing(self):
         self.assertFalse(is_long_video(None, LONG_VIDEO_BYTES))
         self.assertTrue(is_long_video(None, LONG_VIDEO_BYTES + 1))
 
@@ -46,6 +50,16 @@ class LongVideoThresholdTests(unittest.TestCase):
     def test_threshold_constants(self):
         self.assertEqual(LONG_VIDEO_SECONDS, 25 * 60)
         self.assertEqual(LONG_VIDEO_BYTES, 80 * 1024 * 1024)
+
+    def test_max_filesize_across_formats(self):
+        info = {
+            "filesize": 50 * 1024 * 1024,
+            "formats": [
+                {"filesize": 50 * 1024 * 1024},
+                {"filesize_approx": 180 * 1024 * 1024},
+            ],
+        }
+        self.assertEqual(_best_filesize(info), 180 * 1024 * 1024)
 
 
 class CaptionParseTests(unittest.TestCase):
@@ -77,6 +91,17 @@ class TranscriptInstructionTests(unittest.TestCase):
         self.assertTrue(is_transcript_instruction("manda a transcrição"))
         self.assertFalse(is_transcript_instruction("faz um post no LinkedIn"))
         self.assertFalse(is_transcript_instruction(""))
+
+    def test_explicit_txt_request(self):
+        msg = "transcrever... o video é longo, resuma e mande um txt com a transcricao completa"
+        self.assertTrue(wants_transcript_file(msg))
+        self.assertTrue(should_deliver_as_file(msg, 24 * 60, None))
+        self.assertTrue(wants_transcript_file("manda a transcrição completa"))
+        self.assertFalse(wants_transcript_file("faz um post no LinkedIn"))
+
+    def test_user_case_25min_180mb(self):
+        self.assertTrue(is_long_video(25 * 60, 180 * 1024 * 1024))
+        self.assertTrue(should_deliver_as_file("transcreve", 25 * 60, 180 * 1024 * 1024))
 
 
 class TextDownloadTests(unittest.TestCase):
