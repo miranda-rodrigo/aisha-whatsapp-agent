@@ -2,6 +2,39 @@
 
 Aisha é uma assistente pessoal orientada a tarefas que roda no WhatsApp Business API. Ela não é um chatbot para bate-papo — seu papel é executar ações concretas: transcrever áudios, pesquisar na web, gerar imagens, criar lembretes, agendar tarefas recorrentes, analisar documentos e vídeos do YouTube — tudo pelo WhatsApp.
 
+## Missão e princípios
+
+**Missão:** tirar tarefas da cabeça do usuário com o mínimo de fricção, dentro do app que ele já usa todos os dias.
+
+**Visão:** uma assistente que não espera ser perguntada — ela lembra, monitora e entrega antes que você precise pedir.
+
+**Princípios:**
+1. Ação > conversa. Cada interação termina em algo feito ou uma pergunta objetiva.
+2. WhatsApp é a interface inteira. Nenhum app, login ou dashboard novo.
+3. Ambiguidade gera pergunta, nunca suposição. Limite gera honestidade ("não tenho essa habilidade"), nunca invenção.
+4. Proatividade agendada: o valor máximo da Aisha é quando ela inicia a conversa.
+5. Memória a serviço do usuário: ela lembra para personalizar, e o usuário sempre pode ver e apagar o que ela sabe.
+
+**Não-objetivos (por enquanto):** companheira emocional/roleplay, terapia, atendimento comercial para empresas, chamadas de voz, grupos.
+
+**Filtro para novas skills** — se falhar em uma, não entra:
+1. Resolve uma tarefa recorrente real do usuário-alvo?
+2. Funciona bem no formato mensagem (texto/áudio/mídia)?
+3. Executa em segundos ou é agendável?
+4. É melhor aqui do que seria abrindo o ChatGPT? (se não usa proatividade, memória ou o contexto do WhatsApp, provavelmente não)
+
+**Voz:** direta, sem alongar conversa. Emojis só funcionais (✅ 📋 ⏳). Idioma do usuário.
+
+**Estágio do produto:** hoje pessoal, com allowlist. Aberto ao público quando existirem sistema de usuários, rate limiting e billing.
+
+## Roadmap
+
+| Estágio | Foco |
+|---|---|
+| Agora | Produto pessoal / beta fechado. Agente único com tools, memória de longo prazo, webhook confiável. |
+| Em seguida | Observabilidade (Langfuse, se aprovado), evals de regressão, pending states 100% no banco. |
+| Depois | Multi-usuário + rate limiting + billing para abertura pública. Sem datas. |
+
 ## Funcionalidades
 
 ### Comportamento orientado a tarefas
@@ -148,33 +181,15 @@ Mensagem WhatsApp
 
 handle_chat (texto)
         │
-        ├── 0. pedido retroativo de transcrição? ──► refina transcrição bruta guardada (5min TTL)
-        ├── 1. imagem pendente? ──► Processa imagem com instrução
-        ├── 2. YouTube pendente? ──► Gemini 2.5 Flash ──► análise
-        ├── 3. webpage pendente? ──► Jina Reader + gpt-4.1 ──► processa
-        ├── 4. link YouTube? ──────► Gemini 2.5 Flash (ou armazena + pergunta)
-        ├── 5. link web? ──────────► Jina Reader + gpt-4.1 (ou armazena + pergunta)
-        ├── 6. classify (gpt-4.1-mini) ──► SELF? ──► gpt-4.1 + skills.md
-        │                                   │        ├── set_context ──► salva contexto
-        │                                   │        ├── set_language ──► muda idioma
-        │                                   │        └── list_profile ──► lista perfil
-        │                                   │
-        │                                   └── SIMPLE/COMPLEX
-        │                                         │
-        ├── 7. tarefa agendada? ──────────────────┤──► scheduled_task
-        │       ├── criar ──► Supabase + APScheduler (CronTrigger)
-        │       ├── listar ──► lista do Supabase
-        │       └── cancelar ──► desativa no Supabase + remove do APScheduler
-        │
-        ├── 8. menciona lembrete? ────────────────┤──► reminder
-        │       ├── criar ──► Supabase + APScheduler + link GCal
-        │       ├── listar ──► lista do Supabase
-        │       ├── cancelar ──► remove do Supabase + APScheduler
-        │       └── editar ──► atualiza Supabase + APScheduler
-        │
-        └── 9. conversa normal
-                    ├── SIMPLE ──► gpt-4.1
-                    └── COMPLEX ──► gpt-5.4 (web search, image gen)
+        ├── 0. pedido retroativo de transcrição? ──► refina transcrição bruta (5min TTL)
+        ├── 1. estado pendente? ──► CONTINUE / CANCEL / NEW_INTENT
+        ├── 2. saudação trivial? ──► gpt-5.6-luna (sem tools)
+        └── 3. agente (gpt-5.6-terra)
+                    └── loop de tools (até 10 iterações, em paralelo)
+                          ├── web_search / image_generation
+                          ├── lembretes e tarefas agendadas
+                          ├── YouTube / webpage / download
+                          └── memória (save / search / list / forget)
 ```
 
 ## Memória de Sessão
@@ -192,33 +207,20 @@ A Aisha mantém contexto de conversa usando a Responses API da OpenAI com `previ
 ```
 whatsapp-agent/
 ├── aisha/                      # Pacote principal
-│   ├── __init__.py
-│   ├── app.py                  # FastAPI: webhook, roteamento, APScheduler lifespan
+│   ├── app.py                  # FastAPI: webhook assíncrono, APScheduler lifespan
+│   ├── agent.py                # Agentic loop (gpt-5.6-terra) + fast-path (luna)
+│   ├── models.py               # IDs canônicos dos modelos
+│   ├── routing.py              # Helpers puros de roteamento (testáveis)
 │   ├── config.py               # Variáveis de ambiente
-│   ├── session.py              # Gerenciamento de sessões no Supabase (TTL 10min)
-│   ├── user_profile.py         # CRUD de perfis de usuário (contexto, idioma, stats)
-│   └── skills/                 # Habilidades da Aisha
-│       ├── __init__.py
-│       ├── chat.py             # Chat: classificador + gpt-4.1 + gpt-5.4 + auto-consciência
-│       ├── reminder.py         # Lembretes: parsing LLM, agendamento, Google Calendar
-│       ├── reminder_store.py   # CRUD Supabase para tabela reminders
-│       ├── scheduled_task.py   # Tarefas agendadas: parsing, cron, execução com web search
-│       ├── scheduled_task_store.py  # CRUD Supabase para tabela scheduled_tasks
-│       ├── document.py         # Processamento de PDF/DOCX
-│       ├── transcribe.py       # Transcrição de áudio via Whisper API + ffmpeg
-│       ├── refine.py           # Refinamento de transcrições via Gemini 2.5 Flash (fallback: 2.0 Flash Lite)
-│       ├── raw_transcription_state.py  # Cache in-memory de transcrições brutas (TTL 5min)
-│       ├── youtube.py          # Análise de vídeos YouTube via Gemini 2.5 Flash
-│       ├── webpage.py          # Leitura de páginas web via Jina Reader
-│       └── image_state.py      # Estado em memória para imagens pendentes (TTL 5min)
-├── skills.md                   # Documentação das habilidades da Aisha
-├── Dockerfile                  # Python 3.12 + ffmpeg
-├── .dockerignore
-├── .gitignore
-├── .env                        # Variáveis locais (não vai pro deploy)
+│   ├── session.py              # Sessões no Supabase (TTL 10min)
+│   ├── user_profile.py         # Perfis (contexto, idioma, stats)
+│   ├── tools/                  # Wrappers de tools do agente
+│   └── skills/                 # Habilidades (lembrete, doc, youtube, memória…)
+├── skills.md                   # Guia de habilidades (alinhado à missão)
+├── tests/                      # Testes das partes puras
+├── Dockerfile
 ├── requirements.txt
-├── README.md
-└── logo.png
+└── README.md
 ```
 
 ## Stack
@@ -228,22 +230,19 @@ whatsapp-agent/
 | Linguagem | Python 3.12 |
 | Framework | FastAPI + uvicorn |
 | WhatsApp | Meta Cloud API (WhatsApp Business) |
-| LLM classificador | OpenAI gpt-4.1-mini (detecta complexidade + self) |
-| LLM chat simples | OpenAI gpt-4.1 via Responses API |
-| LLM chat complexo | OpenAI gpt-5.4 via Responses API |
-| LLM auto-consciência | OpenAI gpt-4.1 via Responses API + skills.md |
-| LLM documentos | OpenAI gpt-4.1 via Responses API |
-| LLM refinamento | Google Gemini 2.5 Flash (fallback: Gemini 2.0 Flash Lite) |
+| LLM agente | OpenAI gpt-5.6-terra via Responses API |
+| LLM fast-path / extração | OpenAI gpt-5.6-luna |
+| LLM documentos / OCR | OpenAI gpt-5.6-terra |
+| LLM refinamento | Google Gemini 3.6 Flash (fallback: 2.5 Flash) |
 | Transcrição | OpenAI Whisper (whisper-1) |
-| Geração/edição de imagem | gpt-image-1.5 (via Responses API image_generation) |
+| Geração/edição de imagem | image_generation (Responses API) |
 | Busca na web | Ferramenta nativa da Responses API |
+| Memória de longo prazo | Embeddings text-embedding-3-small + tabela memories |
 | Conversão de áudio | ffmpeg |
-| Sessões | Supabase (PostgreSQL) |
-| Perfis de usuário | Supabase (PostgreSQL) |
+| Sessões / perfis / lembretes | Supabase (PostgreSQL) |
 | Lembretes (agendamento) | APScheduler 4.x async + SQLAlchemy |
-| Lembretes (parsing de datas) | dateparser (pt-BR nativo) |
-| Tarefas agendadas (execução) | APScheduler CronTrigger + gpt-5.4 + web_search |
-| Análise de vídeos YouTube | Google Gemini 2.5 Flash |
+| Tarefas agendadas (execução) | APScheduler CronTrigger + gpt-5.6-terra + web_search |
+| Análise de vídeos YouTube | Google Gemini 3.6 Flash (fallback: 2.5 Flash) |
 | Leitura de páginas web | Jina Reader (r.jina.ai) |
 | HTTP client | httpx (async) |
 | Hosting | Railway (Docker) |
@@ -323,6 +322,25 @@ CREATE TABLE scheduled_tasks (
 CREATE INDEX idx_scheduled_tasks_phone_active ON scheduled_tasks (phone, active);
 
 ALTER TABLE scheduled_tasks DISABLE ROW LEVEL SECURITY;
+CREATE TABLE memories (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    phone TEXT NOT NULL,
+    content TEXT NOT NULL,
+    embedding JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_memories_phone ON memories (phone);
+ALTER TABLE memories DISABLE ROW LEVEL SECURITY;
+CREATE TABLE pending_states (
+    phone TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    blob_b64 TEXT,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (phone, kind)
+);
+ALTER TABLE pending_states DISABLE ROW LEVEL SECURITY;
 ```
 
 ### 3. Variáveis de ambiente
@@ -341,6 +359,7 @@ DATABASE_PASSWORD=sua_senha_do_banco
 USER_TIMEZONE=America/Sao_Paulo
 REMINDER_LEAD_MINUTES=15
 GEMINI_API_KEY=AIzaSy...
+WHATSAPP_APP_SECRET=app_secret_da_meta
 ```
 
 | Variável | Descrição |
@@ -356,6 +375,7 @@ GEMINI_API_KEY=AIzaSy...
 | `USER_TIMEZONE` | Timezone do usuário para lembretes (padrão: `America/Sao_Paulo`) |
 | `REMINDER_LEAD_MINUTES` | Minutos de antecedência para o aviso do lembrete (padrão: `15`) |
 | `GEMINI_API_KEY` | API key do Google AI Studio para análise de vídeos YouTube (opcional) |
+| `WHATSAPP_APP_SECRET` | App Secret da Meta para validar `X-Hub-Signature-256`. Se vazio, a verificação é pulada. |
 | `PORT` | Porta do servidor (Railway injeta automaticamente; padrão: 8000) |
 
 ### 4. Rodar localmente
@@ -455,14 +475,13 @@ No painel de developers.facebook.com:
 |---|---|
 | WhatsApp Cloud API (service messages) | Gratuito |
 | OpenAI Whisper (transcrição de áudio) | ~$0.006/min |
-| OpenAI gpt-4.1-mini (classificador de complexidade) | ~$0.00001/msg |
-| OpenAI gpt-4.1 (chat simples + self + docs) | ~$0.001/msg |
-| OpenAI gpt-4.1 vision (OCR de PDFs escaneados) | ~$0.01–$0.05/doc (varia por nº de páginas) |
-| OpenAI gpt-5.4 (chat complexo) | ~$0.005-0.015/msg |
-| Google Gemini 2.5 Flash (refinamento de transcrição) | ~$0.001/msg |
+| OpenAI gpt-5.6-luna (fast-path / extração) | ~$0.00002/msg |
+| OpenAI gpt-5.6-terra (agente + docs + OCR) | ~$0.003-0.012/msg |
+| Google Gemini 3.6 Flash (refinamento / YouTube) | ~$0.001/msg |
 | OpenAI gpt-image-1.5 (imagem) | ~$0.02-0.08/imagem |
 | OpenAI web_search (busca) | ~$0.001/chamada |
-| OpenAI gpt-5.4 (tarefa agendada com web search) | ~$0.01-0.02/execução |
+| OpenAI gpt-5.6-terra (tarefa agendada com web search) | ~$0.01-0.02/execução |
+| OpenAI embeddings (memória) | ~$0.00002/fato |
 | Jina Reader (páginas web) | Gratuito |
 | Supabase | Gratuito (free tier) |
 | Railway | $0-25/mês (trial: $5 créditos grátis) |
@@ -478,7 +497,9 @@ No painel de developers.facebook.com:
 - **Números brasileiros:** A Meta normaliza números BR removendo um dígito 9. Configure `ALLOWED_NUMBERS` com o formato que a Meta envia.
 - **Timezone:** O servidor roda em UTC (Railway). Lembretes usam `USER_TIMEZONE` para calcular horários relativos corretamente.
 - **PgBouncer:** O Supabase usa PgBouncer em modo transaction, que não suporta prepared statements. O engine é criado com `statement_cache_size=0` para evitar `DuplicatePreparedStatementError` na inicialização do APScheduler.
-- **Tarefas agendadas vs. lembretes:** Lembretes enviam texto fixo na hora agendada. Tarefas agendadas executam um prompt completo com `gpt-5.4` + `web_search` a cada disparo, gerando conteúdo dinâmico. Ambos usam APScheduler com persistência no PostgreSQL.
+- **Tarefas agendadas vs. lembretes:** Lembretes enviam texto fixo na hora agendada. Tarefas agendadas executam um prompt completo com `gpt-5.6-terra` + `web_search` a cada disparo, gerando conteúdo dinâmico. Ambos usam APScheduler com persistência no PostgreSQL.
+- **Webhook assíncrono:** o POST `/webhook` valida a assinatura e devolve 200 imediatamente; o processamento roda em background para a Meta não reenviar por timeout.
+- **Memória:** fatos duradouros vão para a tabela `memories` (embedding + busca por similaridade). O usuário pode listar e apagar.
 - **Restauração de jobs:** No startup do servidor, todos os jobs de tarefas agendadas são restaurados do banco para o scheduler. Isso garante que tarefas sobrevivam redeploys.
 - **Logs:** Se a pasta `logs/` existir na raiz do projeto, o app escreve em `logs/aisha.log` com rotação automática (5 MB × 3 arquivos). Caso contrário, só imprime no stdout.
 - **Anti-duplicata de lembretes:** A cada chamada ao agente, os lembretes ativos do usuário são buscados no Supabase e injetados no `instructions` do modelo. Isso permite que o modelo use `edit_reminder` em follow-ups (ex: "inclua o endereço no lembrete") ao invés de criar um segundo lembrete sobre o mesmo evento.

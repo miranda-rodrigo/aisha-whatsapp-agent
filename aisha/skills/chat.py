@@ -23,6 +23,8 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
 from aisha.config import OPENAI_API_KEY, USER_TIMEZONE
+from aisha.models import AGENT_MODEL, DOCUMENT_MODEL, EXTRACT_MODEL, FAST_MODEL
+from aisha.routing import wants_new_session as _wants_new_session
 
 log = logging.getLogger(__name__)
 
@@ -126,7 +128,7 @@ class SelfAction(BaseModel):
 
 _client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
-_CLASSIFIER_MODEL = "gpt-4.1-mini"
+_CLASSIFIER_MODEL = EXTRACT_MODEL
 
 
 @dataclass
@@ -138,10 +140,7 @@ class ChatResult:
 
 def wants_new_session(text: str) -> bool:
     """Check if the user is explicitly requesting a fresh conversation."""
-    for pattern in _NEW_SESSION_PATTERNS:
-        if re.search(pattern, text, re.IGNORECASE):
-            return True
-    return False
+    return _wants_new_session(text)
 
 
 _VALID_LABELS = {"SCHEDULED_TASK", "REMINDER", "SELF", "SIMPLE", "COMPLEX"}
@@ -257,7 +256,7 @@ async def _chat_simple(
 ) -> ChatResult:
     """Handle simple messages with gpt-4.1 via Responses API."""
     kwargs: dict = {
-        "model": "gpt-4.1",
+        "model": FAST_MODEL,
         "instructions": _build_instructions(SYSTEM_PROMPT, profile),
         "input": user_input,
     }
@@ -285,7 +284,7 @@ async def _chat_simple(
 async def _detect_self_action(user_input: str) -> SelfAction:
     """Detect sub-intent within SELF category using structured output."""
     response = await _client.beta.chat.completions.parse(
-        model="gpt-4.1-mini",
+        model=EXTRACT_MODEL,
         messages=[
             {"role": "system", "content": _SELF_ACTION_PROMPT},
             {"role": "user", "content": user_input},
@@ -362,7 +361,7 @@ async def _chat_self(
         input_text = f"{user_input}\n\n---\n{extra_user_data}"
 
     kwargs: dict = {
-        "model": "gpt-4.1",
+        "model": FAST_MODEL,
         "instructions": instructions,
         "input": input_text,
     }
@@ -394,7 +393,7 @@ async def _chat_complex(
 ) -> ChatResult:
     """Handle complex messages with gpt-5.4 + web_search + image_generation."""
     kwargs: dict = {
-        "model": "gpt-5.4",
+        "model": AGENT_MODEL,
         "instructions": _build_instructions(SYSTEM_PROMPT, profile),
         "input": user_input,
         "tools": [
@@ -453,7 +452,7 @@ async def chat_with_image(
     ]
 
     kwargs: dict = {
-        "model": "gpt-5.4",
+        "model": AGENT_MODEL,
         "instructions": _build_instructions(f"{SYSTEM_PROMPT}\n\n{_IMAGE_INSTRUCTIONS}", None),
         "input": multimodal_input,
         "tools": [{"type": "image_generation"}],
@@ -508,7 +507,7 @@ async def chat_with_document(
         user_message = f"INSTRUÇÃO: {user_instruction}\n\n{user_message}"
 
     kwargs: dict = {
-        "model": "gpt-4.1",
+        "model": DOCUMENT_MODEL,
         "instructions": _build_instructions(f"{SYSTEM_PROMPT}\n\n{_DOCUMENT_INSTRUCTIONS}", None),
         "input": user_message,
     }
@@ -545,7 +544,7 @@ async def chat_with_webpage(
         user_message = f"INSTRUÇÃO: {user_instruction}\n\n{user_message}"
 
     kwargs: dict = {
-        "model": "gpt-4.1",
+        "model": DOCUMENT_MODEL,
         "instructions": _build_instructions(f"{SYSTEM_PROMPT}\n\n{_WEBPAGE_INSTRUCTIONS}", None),
         "input": user_message,
     }

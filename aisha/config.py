@@ -34,8 +34,9 @@ SESSION_TIMEOUT_MINUTES = 10
 USER_TIMEZONE = os.environ.get("USER_TIMEZONE", "America/Sao_Paulo")
 REMINDER_LEAD_MINUTES = int(os.environ.get("REMINDER_LEAD_MINUTES", "15"))
 
-AGENTIC_MODE = os.environ.get("AGENTIC_MODE", "false").lower() == "true"
-
 # Public base URL of this server (used to build temporary download links).
 # Example: https://myserver.com  (no trailing slash)
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000")
+
+# Meta App Secret for X-Hub-Signature-256. If empty, signature check is skipped.
+WHATSAPP_APP_SECRET = os.environ.get("WHATSAPP_APP_SECRET", "")

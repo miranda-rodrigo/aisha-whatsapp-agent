@@ -7,11 +7,12 @@ from google.genai import types
 from google.genai.errors import ServerError
 
 from aisha.config import GEMINI_API_KEY
+from aisha.models import GEMINI_FALLBACK, GEMINI_PRIMARY
 
 log = logging.getLogger(__name__)
 
-_PRIMARY_MODEL = "gemini-2.5-flash"
-_FALLBACK_MODEL = "gemini-2.0-flash-lite"
+_PRIMARY_MODEL = GEMINI_PRIMARY
+_FALLBACK_MODEL = GEMINI_FALLBACK
 
 _SYSTEM_PROMPT = """\
 Atue como um editor de textos especializado em transcrições. \

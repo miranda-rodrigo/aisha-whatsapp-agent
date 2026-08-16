@@ -28,6 +28,12 @@ from aisha.tools.profile import (
     tool_set_language,
     tool_get_my_profile,
 )
+from aisha.tools.memory import (
+    tool_save_memory,
+    tool_search_memory,
+    tool_list_memories,
+    tool_forget_memory,
+)
 
 log = logging.getLogger(__name__)
 
@@ -321,6 +327,78 @@ TOOL_DEFINITIONS: list[dict] = [
     },
     {
         "type": "function",
+        "name": "save_memory",
+        "description": (
+            "Save a durable personal fact about the user (preferences, people, places, "
+            "recurring context). Use when the user shares information that should be "
+            "remembered across conversations. Do not save ephemeral one-off details."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "A concise fact to remember, e.g. 'Mora em Fortaleza e trabalha com Python'",
+                },
+            },
+            "required": ["content"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "search_memory",
+        "description": "Search previously saved memories about the user by semantic similarity.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "What to look up in the user's memories",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results (default 5)",
+                },
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "list_memories",
+        "description": "List all saved long-term memories for the user.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "forget_memory",
+        "description": (
+            "Delete a saved memory. Use when the user asks to forget something. "
+            "Prefer memory_id from list_memories; otherwise pass a query to find it."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "memory_id": {
+                    "type": "string",
+                    "description": "UUID of the memory to delete",
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Text used to find the memory if id is unknown",
+                },
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
         "name": "get_my_profile",
         "description": (
             "Retrieve the user's full profile: personal context, preferred language, timezone, "
@@ -350,6 +428,10 @@ _DISPATCH = {
     "set_personal_context": tool_set_personal_context,
     "set_language": tool_set_language,
     "get_my_profile": tool_get_my_profile,
+    "save_memory": tool_save_memory,
+    "search_memory": tool_search_memory,
+    "list_memories": tool_list_memories,
+    "forget_memory": tool_forget_memory,
 }
 
 
