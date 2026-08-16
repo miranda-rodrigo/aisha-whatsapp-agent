@@ -76,7 +76,10 @@ from aisha.user_profile import get_profile, increment_stat, upsert_timezone
 from aisha.skills.youtube import (
     analyze_video,
     clear_pending_video,
+    extract_youtube_url,
     get_pending_video,
+    store_pending_video,
+    strip_youtube_url,
 )
 from aisha.skills.video_download import (
     cleanup_expired,
@@ -560,6 +563,25 @@ async def handle_chat(sender: str, text: str):
                 log.info(f"Retroactive transcription request for {sender}")
                 await _send_refined_transcription(sender, raw)
                 return
+
+        youtube_url = extract_youtube_url(text)
+        if youtube_url:
+            instruction = strip_youtube_url(text).strip("\\ \n\t")
+            if not instruction:
+                store_pending_video(sender, youtube_url)
+                await send_message(
+                    sender,
+                    "O que você quer que eu faça com esse vídeo? "
+                    "Posso transcrever, resumir ou listar os pontos principais.",
+                )
+                return
+
+            clear_pending_video(sender)
+            await send_message(sender, "⏳ Analisando vídeo...")
+            await increment_stat(sender, "youtube")
+            reply = await analyze_video(youtube_url, instruction)
+            await send_message(sender, reply)
+            return
 
         await _hydrate_pendings(sender)
         pending_desc = _get_pending_description(sender)
