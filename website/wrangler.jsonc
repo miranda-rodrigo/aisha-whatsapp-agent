@@ -1,0 +1,9 @@
+{
+  "name": "aisha-whatsapp-agent",
+  "compatibility_date": "2026-08-16",
+  "preview_urls": true,
+  "assets": {
+    "directory": "./out",
+    "not_found_handling": "404-page"
+  }
+}
