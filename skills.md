@@ -63,6 +63,8 @@ Envie um áudio **mencionando "Aisha"** para conversar com ela por voz.
 
 A palavra "Aisha" em qualquer parte do áudio indica que é uma conversa, não uma transcrição.
 
+**YouTube também entra aqui:** se você pediu transcrição e em seguida mandar um link do YouTube, a Aisha transcreve o vídeo (não pergunta de novo). Áudio do WhatsApp e vídeo do YouTube são skills diferentes; as duas existem.
+
 ---
 
 ## 4. Busca na Web
@@ -313,14 +315,20 @@ https://www.youtube.com/watch?v=abc123 transcreve esse vídeo
 https://youtu.be/xyz quais são os pontos principais?
 ```
 
-### Enviar só o link (Aisha pergunta o que fazer)
+### Enviar só o link
+
+Se a conversa **já** deixou a intenção clara (ex: "você transcreve?", "me resume um vídeo"), ela executa direto.
+
+Se o link chega sem contexto, ela pergunta o que fazer.
 
 ```
+Você: você tem skill de transcrição?
+Aisha: Sim — áudio do WhatsApp ou vídeo do YouTube.
 Você: https://youtu.be/dQw4w9WgXcQ
-Aisha: 🎬 Link do YouTube detectado! O que você quer que eu faça com esse vídeo?
+Aisha: [transcrição do vídeo]
 
-Você: resume em tópicos
-Aisha: [análise completa do vídeo]
+Você: https://youtu.be/dQw4w9WgXcQ
+Aisha: O que você quer que eu faça com esse vídeo?
 ```
 
 **Exemplos de instruções:**

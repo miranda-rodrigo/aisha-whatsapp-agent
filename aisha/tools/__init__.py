@@ -223,8 +223,11 @@ TOOL_DEFINITIONS: list[dict] = [
         "type": "function",
         "name": "analyze_youtube_video",
         "description": (
-            "Analyze a YouTube video: summarize, transcribe, extract key points, etc. "
-            "Use this when the user sends a YouTube URL or asks about a YouTube video."
+            "Analyze a public YouTube video: transcribe, summarize, extract key points, etc. "
+            "This IS the YouTube transcription skill. Use it when the user sends a YouTube URL "
+            "and wants a transcript, summary, or analysis — including when that intent came from "
+            "the previous turn (e.g. they asked if you can transcribe, then sent the link). "
+            "Do not ask again if the intent is already clear."
         ),
         "parameters": {
             "type": "object",
