@@ -5,6 +5,7 @@ agent prompt with web_search enabled and send the AI-generated result.
 Example: "toda segunda me mande um relatório sobre notícias do Irã".
 """
 
+import asyncio
 import logging
 import re
 import unicodedata
@@ -24,6 +25,7 @@ from aisha.config import (
     USER_TIMEZONE,
     WHATSAPP_TOKEN,
 )
+from aisha.models import AGENT_MODEL, EXTRACT_MODEL
 from aisha.skills.scheduled_task_store import (
     ScheduledTask,
     deactivate_task,
@@ -131,7 +133,7 @@ def is_scheduled_task_intent(text: str) -> bool:
 async def _extract(text: str, user_tz: str) -> TaskExtraction:
     """Call gpt-4o-mini with structured output to extract task intent."""
     response = await _client.beta.chat.completions.parse(
-        model="gpt-4o-mini",
+        model=EXTRACT_MODEL,
         messages=[
             {"role": "system", "content": _build_extract_system(user_tz)},
             {"role": "user", "content": text},
@@ -232,7 +234,7 @@ async def _execute_task(phone: str, task_id: str, name: str, prompt: str) -> Non
     log.info(f"Executing scheduled task '{name}' (id={task_id}) for {phone}")
     try:
         response = await _client.responses.create(
-            model="gpt-5.4",
+            model=AGENT_MODEL,
             instructions=(
                 "Você é Aisha, uma assistente pessoal. Execute a tarefa abaixo e "
                 "retorne o resultado de forma clara, organizada e em português. "
@@ -240,7 +242,11 @@ async def _execute_task(phone: str, task_id: str, name: str, prompt: str) -> Non
             ),
             input=prompt,
             tools=[{"type": "web_search"}],
+            background=True,
         )
+        while getattr(response, "status", None) in ("queued", "in_progress"):
+            await asyncio.sleep(2)
+            response = await _client.responses.retrieve(response.id)
 
         text_parts = [
             content.text

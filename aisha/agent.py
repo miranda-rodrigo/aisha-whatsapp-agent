@@ -1,12 +1,11 @@
 """Aisha agentic loop using OpenAI Responses API with tool calling.
 
-This module implements a real agentic loop where the model receives all
-available tools and autonomously decides which to invoke, in what order,
-and how many times — replacing the manual if/elif classifier approach.
+The model receives all available tools and autonomously decides which to
+invoke, in what order, and how many times.
 """
 
+import asyncio
 import base64
-import json
 import logging
 import zoneinfo
 from dataclasses import dataclass
@@ -16,14 +15,15 @@ from pathlib import Path
 from openai import AsyncOpenAI
 
 from aisha.config import BASE_URL, OPENAI_API_KEY, USER_TIMEZONE
+from aisha.models import AGENT_MODEL, FAST_MODEL
 from aisha.tools import TOOL_DEFINITIONS, ToolContext, execute_tool
 
 log = logging.getLogger(__name__)
 
 _client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
-_MODEL = "gpt-5.4"
 _MAX_ITERATIONS = 10
+_COMPACT_THRESHOLD = 80_000
 
 _WEEKDAYS = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira",
              "sexta-feira", "sábado", "domingo"]
@@ -31,9 +31,9 @@ _MONTHS = ["", "janeiro", "fevereiro", "março", "abril", "maio", "junho",
            "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"]
 
 _skills_path = Path(__file__).parents[1] / "skills.md"
-_SKILLS_SUMMARY: str = ""
+_SKILLS_SUMMARY = ""
 if _skills_path.exists():
-    _SKILLS_SUMMARY = _skills_path.read_text(encoding="utf-8")
+    _SKILLS_SUMMARY = _skills_path.read_text(encoding="utf-8")[:4000]
 
 
 def _now_str(user_tz: str) -> str:
@@ -43,24 +43,32 @@ def _now_str(user_tz: str) -> str:
     return f"{wd}, {now.day} de {month} de {now.year}, {now.strftime('%H:%M')}"
 
 
-def _build_system_prompt(profile: dict | None, user_tz: str, active_reminders: list[dict] | None = None) -> str:
-    parts = [
-        "Você é Aisha, uma assistente pessoal orientada a tarefas que opera via WhatsApp. "
-        "Você NÃO é um chatbot para bate-papo. Seu papel é executar ações concretas "
-        "para o usuário usando suas ferramentas.",
+def _build_system_prompt(
+    profile: dict | None,
+    user_tz: str,
+    active_reminders: list[dict] | None = None,
+    memories: list[dict] | None = None,
+) -> str:
+    stable = [
+        "Você é Aisha, uma assistente pessoal orientada a tarefas que opera via WhatsApp.",
+        "Missão: tirar tarefas da cabeça do usuário com o mínimo de fricção, no app que ele já usa todos os dias.",
+        "Você NÃO é um chatbot para bate-papo. Seu papel é executar ações concretas.",
+        "",
+        "PRINCÍPIOS:",
+        "1. Ação > conversa. Cada interação termina em algo feito ou uma pergunta objetiva.",
+        "2. WhatsApp é a interface inteira. Não peça apps, logins ou dashboards.",
+        "3. Ambiguidade gera pergunta, nunca suposição. Limite gera honestidade: 'Não tenho essa habilidade.'",
+        "4. Proatividade agendada é o valor máximo — lembretes e tarefas que você inicia.",
+        "5. Memória a serviço do usuário: lembre para personalizar; o usuário pode ver e apagar o que você sabe.",
+        "",
+        "VOZ: direta, sem alongar conversa. Emojis só funcionais (✅ 📋 ⏳). Idioma do usuário.",
         "",
         "COMPORTAMENTO PADRÃO:",
-        "- AÇÃO CLARA: quando a mensagem contém uma intenção explícita de ação "
-        "(criar lembrete, pesquisar, resumir, gerar imagem, etc.), execute diretamente.",
-        "- MENSAGEM AMBÍGUA: quando a mensagem parece ser conteúdo encaminhado "
-        "(ata de reunião, texto copiado, lista de itens, notícia, etc.) SEM instrução "
-        "explícita, pergunte: 'O que você quer que eu faça com isso?'",
-        "- PERGUNTA DIRETA: perguntas objetivas ('qual o dólar hoje?', 'o que é inflação?') "
-        "podem ser respondidas diretamente — buscar informação é uma ação implícita.",
-        "- SAUDAÇÃO: responda de forma breve e natural ('Oi! Como posso te ajudar?'). "
-        "NÃO estenda a conversa — espere a próxima tarefa.",
-        "- PEDIDO IMPOSSÍVEL: se o usuário pedir algo fora das suas ferramentas, "
-        "responda: 'Não tenho essa habilidade.' Não invente capacidades.",
+        "- AÇÃO CLARA: execute diretamente (criar lembrete, pesquisar, resumir, gerar imagem).",
+        "- MENSAGEM AMBÍGUA: conteúdo encaminhado sem instrução → 'O que você quer que eu faça com isso?'",
+        "- PERGUNTA DIRETA: responda. Buscar informação é uma ação implícita.",
+        "- SAUDAÇÃO: breve ('Oi! Como posso te ajudar?'). NÃO estenda a conversa.",
+        "- PEDIDO IMPOSSÍVEL: 'Não tenho essa habilidade.' Não invente capacidades.",
         "",
         "REGRAS DE USO DAS FERRAMENTAS:",
         "- Use o idioma do usuário (ou o idioma preferido dele, se configurado).",
@@ -70,36 +78,43 @@ def _build_system_prompt(profile: dict | None, user_tz: str, active_reminders: l
         "    * Se já existe um lembrete sobre o mesmo assunto/evento, use edit_reminder.",
         "    * Só use create_reminder se o lembrete é claramente novo.",
         "- Quando o usuário pedir uma tarefa recorrente/agendada, use create_scheduled_task.",
-        "- Link do YouTube SEM instrução: NÃO processe automaticamente. "
-        "Pergunte o que o usuário quer fazer (resumo, download, transcrição, perguntas).",
+        "- Link do YouTube SEM instrução: NÃO processe automaticamente. Pergunte o que fazer.",
         "- Link do YouTube COM instrução na mesma mensagem: processe diretamente.",
-        "- Qualquer outro link SEM instrução: pergunte o que fazer. "
-        "Com instrução, use read_webpage diretamente.",
+        "- Qualquer outro link SEM instrução: pergunte o que fazer. Com instrução, use read_webpage.",
         "- Para baixar vídeos, use download_video.",
-        "- Quando o usuário compartilhar informações pessoais, use set_personal_context.",
+        "- Quando o usuário compartilhar informações pessoais duradouras, use save_memory.",
         "- Para mudar idioma, use set_language. Para consultar perfil, use get_my_profile.",
-        "- Você pode chamar múltiplas ferramentas em uma única resposta "
-        "quando a mensagem contiver múltiplas intenções.",
-        "",
-        f"Data/hora atual: {_now_str(user_tz)} ({user_tz}).",
+        "- 'O que você sabe de mim?' → get_my_profile + list_memories.",
+        "- 'Esqueça isso' / 'apaga essa memória' → forget_memory.",
+        "- Você pode chamar múltiplas ferramentas em uma única resposta quando houver múltiplas intenções.",
     ]
+    if _SKILLS_SUMMARY:
+        stable.append("\nRESUMO DAS HABILIDADES (referência):\n" + _SKILLS_SUMMARY)
+
+    dynamic = [f"\nData/hora atual: {_now_str(user_tz)} ({user_tz})."]
 
     if profile:
         if profile.get("personal_context"):
-            parts.append(f"\nContexto pessoal do usuário:\n{profile['personal_context']}")
+            dynamic.append(f"\nContexto pessoal do usuário:\n{profile['personal_context']}")
         if profile.get("language"):
-            parts.append(f"\nIdioma preferido: {profile['language']}. Responda nesse idioma.")
+            dynamic.append(f"\nIdioma preferido: {profile['language']}. Responda nesse idioma.")
+
+    if memories:
+        lines = ["\nMEMÓRIAS RELEVANTES DO USUÁRIO:"]
+        for m in memories:
+            lines.append(f"  - {m['content']}")
+        dynamic.append("\n".join(lines))
 
     if active_reminders:
         lines = ["\nLEMBRETES ATIVOS DO USUÁRIO (use edit_reminder antes de criar um novo sobre o mesmo assunto):"]
         for r in active_reminders:
             recur = " [recorrente]" if r.get("is_recurring") else ""
             lines.append(f"  #{r['number']}. {r['message']} — {r['datetime_display']}{recur}")
-        parts.append("\n".join(lines))
+        dynamic.append("\n".join(lines))
     else:
-        parts.append("\nLEMBRETES ATIVOS DO USUÁRIO: nenhum.")
+        dynamic.append("\nLEMBRETES ATIVOS DO USUÁRIO: nenhum.")
 
-    return "\n".join(parts)
+    return "\n".join(stable + dynamic)
 
 
 @dataclass
@@ -109,6 +124,42 @@ class AgentResult:
     response_id: str | None = None
     tools_called: list[str] | None = None
     iterations: int = 0
+
+
+def _parse_response(response) -> tuple[str | None, bytes | None]:
+    text_parts: list[str] = []
+    image_bytes: bytes | None = None
+    for item in response.output:
+        if item.type == "message":
+            for content in item.content:
+                if content.type == "output_text":
+                    text_parts.append(content.text)
+        elif item.type == "image_generation_call":
+            image_bytes = base64.b64decode(item.result)
+    return ("\n".join(text_parts) if text_parts else None, image_bytes)
+
+
+async def run_fast_path(
+    user_input: str,
+    previous_response_id: str | None = None,
+    phone: str | None = None,
+) -> AgentResult:
+    """Cheap path for greetings and thanks — no tools, Luna only."""
+    from aisha.user_profile import get_profile
+
+    profile = await get_profile(phone) if phone else None
+    user_tz = (profile or {}).get("timezone") or USER_TIMEZONE
+    instructions = _build_system_prompt(profile, user_tz)
+    kwargs: dict = {
+        "model": FAST_MODEL,
+        "instructions": instructions,
+        "input": user_input,
+    }
+    if previous_response_id:
+        kwargs["previous_response_id"] = previous_response_id
+    response = await _client.responses.create(**kwargs)
+    text, image_bytes = _parse_response(response)
+    return AgentResult(text=text, image_bytes=image_bytes, response_id=response.id, iterations=1)
 
 
 async def run_agent(
@@ -121,6 +172,7 @@ async def run_agent(
     from aisha.user_profile import get_profile
     from aisha.skills.reminder_store import get_reminders
     from aisha.skills.reminder import _fmt_local
+    from aisha.skills.memory_store import search_memories
     from datetime import datetime as _datetime
 
     profile = await get_profile(phone) if phone else None
@@ -143,7 +195,14 @@ async def run_agent(
         except Exception:
             log.warning("Failed to fetch active reminders for system prompt", exc_info=True)
 
-    instructions = _build_system_prompt(profile, user_tz, active_reminders)
+    memories: list[dict] | None = None
+    if phone and isinstance(user_input, str):
+        try:
+            memories = await search_memories(phone, user_input, limit=5)
+        except Exception:
+            log.warning("Failed to search memories for system prompt", exc_info=True)
+
+    instructions = _build_system_prompt(profile, user_tz, active_reminders, memories)
 
     ctx = ToolContext(
         phone=phone or "",
@@ -153,19 +212,23 @@ async def run_agent(
     )
 
     tools_called: list[str] = []
-    current_input = user_input
 
     kwargs: dict = {
-        "model": _MODEL,
+        "model": AGENT_MODEL,
         "instructions": instructions,
-        "input": current_input,
+        "input": user_input,
         "tools": TOOL_DEFINITIONS,
+        "context_management": [
+            {"type": "compaction", "compact_threshold": _COMPACT_THRESHOLD},
+        ],
     }
     if previous_response_id:
         kwargs["previous_response_id"] = previous_response_id
 
     log.info(f"Agent starting: input={str(user_input)[:120]} (prev={previous_response_id})")
 
+    response = None
+    iteration = 0
     for iteration in range(1, _MAX_ITERATIONS + 1):
         response = await _client.responses.create(**kwargs)
 
@@ -177,41 +240,38 @@ async def run_agent(
         if not function_calls:
             break
 
-        tool_outputs = []
-        for call in function_calls:
+        async def _run_one(call):
             log.info(f"Agent iteration {iteration}: calling {call.name}")
-            tools_called.append(call.name)
-
             result_str = await execute_tool(call.name, call.arguments, ctx)
-            tool_outputs.append({
+            return {
                 "type": "function_call_output",
                 "call_id": call.call_id,
                 "output": result_str,
-            })
+                "name": call.name,
+            }
+
+        results = await asyncio.gather(*[_run_one(call) for call in function_calls])
+        tool_outputs = []
+        for item in results:
+            tools_called.append(item.pop("name"))
+            tool_outputs.append(item)
 
         kwargs = {
-            "model": _MODEL,
+            "model": AGENT_MODEL,
             "instructions": instructions,
             "input": tool_outputs,
             "tools": TOOL_DEFINITIONS,
             "previous_response_id": response.id,
+            "context_management": [
+                {"type": "compaction", "compact_threshold": _COMPACT_THRESHOLD},
+            ],
         }
 
-    text_parts: list[str] = []
-    image_bytes: bytes | None = None
-
-    for item in response.output:
-        if item.type == "message":
-            for content in item.content:
-                if content.type == "output_text":
-                    text_parts.append(content.text)
-        elif item.type == "image_generation_call":
-            image_bytes = base64.b64decode(item.result)
-
+    text, image_bytes = _parse_response(response)
     result = AgentResult(
-        text="\n".join(text_parts) if text_parts else None,
+        text=text,
         image_bytes=image_bytes,
-        response_id=response.id,
+        response_id=response.id if response else None,
         tools_called=tools_called if tools_called else None,
         iterations=iteration,
     )

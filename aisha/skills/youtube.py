@@ -9,10 +9,12 @@ from google import genai
 from google.genai import types
 
 from aisha.config import GEMINI_API_KEY
+from aisha.models import GEMINI_FALLBACK, GEMINI_PRIMARY
 
 log = logging.getLogger(__name__)
 
-_MODEL = "gemini-2.5-flash"
+_MODEL = GEMINI_PRIMARY
+_FALLBACK_MODEL = GEMINI_FALLBACK
 _client: genai.Client | None = None
 
 
@@ -59,7 +61,15 @@ def strip_youtube_url(text: str) -> str:
 
 
 def store_pending_video(phone: str, url: str) -> None:
+    import asyncio
+    from aisha.skills.pending_store import upsert_pending
     _pending[phone] = PendingVideo(url=url)
+    try:
+        asyncio.get_running_loop().create_task(
+            upsert_pending(phone, "youtube", {"url": url}, _PENDING_TTL_MINUTES * 60)
+        )
+    except RuntimeError:
+        pass
 
 
 def get_pending_video(phone: str) -> PendingVideo | None:
@@ -74,7 +84,13 @@ def get_pending_video(phone: str) -> PendingVideo | None:
 
 
 def clear_pending_video(phone: str) -> None:
+    import asyncio
+    from aisha.skills.pending_store import clear_pending
     _pending.pop(phone, None)
+    try:
+        asyncio.get_running_loop().create_task(clear_pending(phone, "youtube"))
+    except RuntimeError:
+        pass
 
 
 async def analyze_video(url: str, instruction: str) -> str:
@@ -85,15 +101,22 @@ async def analyze_video(url: str, instruction: str) -> str:
 
     log.info(f"Analyzing YouTube video: {url} | prompt: {prompt[:80]}")
 
-    try:
+    async def _generate(model: str):
         response = await _get_client().aio.models.generate_content(
-            model=_MODEL,
+            model=model,
             contents=[
                 types.Part.from_uri(file_uri=url, mime_type="video/mp4"),
                 prompt,
             ],
         )
         return response.text
+
+    try:
+        try:
+            return await _generate(_MODEL)
+        except Exception as primary_exc:
+            log.warning(f"Primary YouTube model {_MODEL} failed ({primary_exc}); trying {_FALLBACK_MODEL}")
+            return await _generate(_FALLBACK_MODEL)
     except ClientError as e:
         if e.code == 403:
             log.warning(f"Gemini 403 for {url} — live stream or restricted video")

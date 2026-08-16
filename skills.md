@@ -1,6 +1,6 @@
 # Aisha — Guia de Habilidades
 
-A Aisha é uma assistente pessoal orientada a tarefas. Ela não é um chatbot para bate-papo — seu papel é executar ações concretas para você.
+A Aisha é uma assistente pessoal orientada a tarefas. Missão: tirar tarefas da sua cabeça com o mínimo de fricção, no WhatsApp. Ela não é um chatbot para bate-papo — cada interação termina em algo feito ou numa pergunta objetiva.
 
 ---
 
@@ -169,7 +169,8 @@ Aisha: [resposta focada nas cláusulas de rescisão]
 
 **Observações:**
 - Formatos suportados: **PDF** e **Word (.docx)**
-- PDFs escaneados (só imagem) não são suportados — apenas PDFs com texto digital
+- PDFs nativos: extração de texto direta
+- PDFs escaneados: OCR automático via visão. Se passar do limite de páginas, a Aisha pede quais páginas analisar
 - Limite de tamanho: 50 MB por documento
 
 ---
@@ -396,6 +397,8 @@ Envie informações sobre você — a Aisha vai lembrar para sempre e usar em to
 
 Você pode atualizar seu contexto a qualquer momento — basta enviar novas informações.
 
+A Aisha também guarda **memórias** (fatos duradouros) e as usa nas conversas seguintes. Você pode perguntar *"o que você sabe de mim?"* ou pedir *"esqueça que eu moro em Fortaleza"*.
+
 ### Mudar o idioma
 
 ```
@@ -457,17 +460,18 @@ A Aisha escolhe automaticamente o melhor modelo para cada tarefa — você não 
 
 | Tipo de tarefa | Modelo usado |
 |---|---|
-| Orquestração geral (agente) | `gpt-5.4` — decide quais ferramentas usar |
-| Pesquisa, raciocínio, tarefas complexas | `gpt-5.4` — mais capaz |
-| Geração e edição de imagem | `gpt-5.4` + ferramenta `image_generation` |
+| Orquestração geral (agente) | `gpt-5.6-terra` — decide quais ferramentas usar |
+| Saudações e extração estruturada | `gpt-5.6-luna` |
+| Pesquisa, raciocínio, tarefas complexas | `gpt-5.6-terra` |
+| Geração e edição de imagem | `gpt-5.6-terra` + `image_generation` |
 | Transcrição de áudio | `whisper-1` |
-| Refinamento de transcrição | `gpt-4o-mini` |
-| Extração de intenção de lembrete | `gpt-4.1-mini` |
-| Extração de intenção de tarefa agendada | `gpt-4o-mini` |
-| Execução de tarefa agendada (com web search) | `gpt-5.4` |
-| Resumo de documentos PDF/DOCX | `gpt-4.1` |
-| Análise de vídeo YouTube | `gemini-2.5-flash` |
-| Leitura de páginas web | Jina Reader + `gpt-4.1` |
+| Refinamento de transcrição | `gemini-3.6-flash` (fallback: `gemini-2.5-flash`) |
+| Extração de intenção de lembrete / tarefa | `gpt-5.6-luna` |
+| Execução de tarefa agendada (com web search) | `gpt-5.6-terra` |
+| Resumo de documentos PDF/DOCX e OCR | `gpt-5.6-terra` |
+| Análise de vídeo YouTube | `gemini-3.6-flash` (fallback: `gemini-2.5-flash`) |
+| Leitura de páginas web | Jina Reader + `gpt-5.6-terra` |
+| Memória de longo prazo | `text-embedding-3-small` + tools `save_memory` / `forget_memory` |
 
 ---
 

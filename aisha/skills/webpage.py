@@ -55,7 +55,15 @@ def _is_youtube(url: str) -> bool:
 
 
 def store_pending_page(phone: str, url: str) -> None:
+    import asyncio
+    from aisha.skills.pending_store import upsert_pending
     _pending[phone] = PendingPage(url=url)
+    try:
+        asyncio.get_running_loop().create_task(
+            upsert_pending(phone, "webpage", {"url": url}, _PENDING_TTL_MINUTES * 60)
+        )
+    except RuntimeError:
+        pass
 
 
 def get_pending_page(phone: str) -> PendingPage | None:
@@ -70,7 +78,13 @@ def get_pending_page(phone: str) -> PendingPage | None:
 
 
 def clear_pending_page(phone: str) -> None:
+    import asyncio
+    from aisha.skills.pending_store import clear_pending
     _pending.pop(phone, None)
+    try:
+        asyncio.get_running_loop().create_task(clear_pending(phone, "webpage"))
+    except RuntimeError:
+        pass
 
 
 async def fetch_page(url: str) -> str:

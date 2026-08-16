@@ -69,6 +69,14 @@ async def tool_get_my_profile(args: dict, ctx: ToolContext) -> str:
             "cron_expression": t["cron_expression"],
         })
 
+    from aisha.skills.memory_store import list_memories
+
+    memories = []
+    try:
+        memories = await list_memories(ctx.phone)
+    except Exception:
+        log.warning("Failed to list memories for profile", exc_info=True)
+
     return json.dumps({
         "personal_context": ctx_text,
         "language": lang,
@@ -76,4 +84,5 @@ async def tool_get_my_profile(args: dict, ctx: ToolContext) -> str:
         "stats": stats,
         "active_reminders": reminder_list,
         "scheduled_tasks": task_list,
+        "memories": [m.get("content") for m in memories],
     })

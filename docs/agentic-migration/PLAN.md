@@ -20,8 +20,7 @@ O modelo conhece todas as capacidades e orquestra autonomamente.
 
 ## Reversibilidade
 
-`AGENTIC_MODE=false` (default) → código antigo intacto, sem nenhuma mudança de comportamento.
-`AGENTIC_MODE=true` → novo agentic loop assume.
+O feature flag `AGENTIC_MODE` foi removido. O caminho legado (`_handle_chat_legacy`) não existe mais: o agente é o único orquestrador.
 
 ## Arquitetura
 

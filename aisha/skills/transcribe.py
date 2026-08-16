@@ -10,6 +10,7 @@ from pathlib import Path
 from openai import OpenAI
 
 from aisha.config import OPENAI_API_KEY
+from aisha.models import WHISPER_MODEL
 
 MAX_FILE_SIZE = 24 * 1024 * 1024  # 24 MB safety margin for Whisper's 25 MB limit
 CHUNK_DURATION_SECONDS = 600  # 10 minutes per chunk
@@ -87,7 +88,7 @@ def _split_audio(audio_path: Path, chunk_duration: int, tmp_dir: str) -> list[Pa
 def _transcribe_file(client: OpenAI, audio_path: Path) -> str:
     with open(audio_path, "rb") as f:
         transcription = client.audio.transcriptions.create(
-            model="whisper-1",
+            model=WHISPER_MODEL,
             file=f,
         )
     return transcription.text

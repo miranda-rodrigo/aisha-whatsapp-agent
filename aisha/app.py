@@ -1,4 +1,7 @@
 import asyncio
+import base64
+import hashlib
+import hmac
 import json
 import logging
 import logging.handlers
@@ -15,17 +18,28 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from aisha.skills.chat import chat, chat_with_document, chat_with_image, chat_with_webpage, classify, classify_pending_response, wants_new_session
+from aisha.skills.chat import chat_with_webpage, classify, classify_pending_response, wants_new_session
 from aisha.config import (
-    AGENTIC_MODE,
     ALLOWED_NUMBERS,
     BASE_URL,
     DATABASE_PASSWORD,
     GRAPH_API_URL,
     SUPABASE_URL,
     WEBHOOK_VERIFY_TOKEN,
+    WHATSAPP_APP_SECRET,
     WHATSAPP_TOKEN,
 )
+from aisha.models import EXTRACT_MODEL
+from aisha.routing import (
+    contains_aisha as _contains_aisha,
+    is_download_intent as _is_download_intent,
+    is_retroactive_transcription_request as _is_retroactive_transcription_request,
+    is_transcription_request as _is_transcription_request,
+    is_trivial_message,
+    parse_page_selection as _parse_page_selection,
+    strip_aisha as _strip_aisha,
+)
+from aisha.skills.pending_store import clear_all_pending, clear_pending, get_pending, upsert_pending
 from aisha.skills.document import (
     extract_text_async,
     extract_scanned_pages,
@@ -37,13 +51,19 @@ from aisha.skills.document import (
 from aisha.skills.document_state import (
     clear_pending_document,
     get_pending_document,
+    get_pending_document_async,
     store_pending_document,
 )
-from aisha.skills.image_state import clear_pending_image, get_pending_image, store_pending_image
+from aisha.skills.image_state import (
+    clear_pending_image,
+    get_pending_image,
+    get_pending_image_async,
+    store_pending_image,
+)
 from aisha.skills.refine import refine_transcription
 from aisha.skills.raw_transcription_state import (
-    get_raw_transcription,
     pop_raw_transcription,
+    pop_raw_transcription_async,
     store_raw_transcription,
 )
 from aisha.skills.reminder import handle_reminder
@@ -55,24 +75,17 @@ from aisha.user_profile import get_profile, increment_stat, upsert_timezone
 from aisha.skills.youtube import (
     analyze_video,
     clear_pending_video,
-    extract_youtube_url,
     get_pending_video,
-    store_pending_video,
-    strip_youtube_url,
 )
 from aisha.skills.video_download import (
     cleanup_expired,
     download_video,
-    extract_video_url,
     get_download_entry,
 )
 from aisha.skills.webpage import (
     clear_pending_page,
-    extract_web_url,
     fetch_page,
     get_pending_page,
-    store_pending_page,
-    strip_web_url,
 )
 
 _log_handlers: list[logging.Handler] = [logging.StreamHandler()]
@@ -96,6 +109,26 @@ log = logging.getLogger(__name__)
 
 http_client: httpx.AsyncClient
 scheduler: AsyncScheduler
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _spawn(coro) -> None:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+def _verify_signature(raw_body: bytes, header: str | None) -> bool:
+    if not WHATSAPP_APP_SECRET:
+        return True
+    if not header or not header.startswith("sha256="):
+        return False
+    expected = hmac.new(
+        WHATSAPP_APP_SECRET.encode(),
+        raw_body,
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(header[7:], expected)
 
 # --- Deduplication with TTL (Layer 5) ---
 _processed_messages: OrderedDict[str, float] = OrderedDict()
@@ -208,22 +241,34 @@ async def serve_download(token: str):
 
 @app.post("/webhook")
 async def receive_webhook(request: Request):
-    """Receives incoming message notifications from Meta."""
-    body = await request.json()
-    log.info("Webhook payload received")
+    """Receives incoming message notifications from Meta. ACKs immediately."""
+    raw = await request.body()
+    if not _verify_signature(raw, request.headers.get("X-Hub-Signature-256")):
+        log.warning("Webhook signature verification failed")
+        raise HTTPException(status_code=403, detail="invalid signature")
 
+    try:
+        body = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"status": "invalid json"}
+
+    log.info("Webhook payload received")
+    _spawn(_process_webhook(body))
+    return {"status": "ok"}
+
+
+async def _process_webhook(body: dict) -> None:
     try:
         entry = body["entry"][0]
         changes = entry["changes"][0]
         value = changes["value"]
         messages = value.get("messages")
         if not messages:
-            return {"status": "no message"}
+            return
         message = messages[0]
     except (KeyError, IndexError):
-        return {"status": "no message"}
+        return
 
-    # Layer 3: log suspicious webhooks missing contacts
     contacts = value.get("contacts")
     if not contacts:
         log.warning(
@@ -231,22 +276,19 @@ async def receive_webhook(request: Request):
             f"{json.dumps(body, ensure_ascii=False)[:500]}"
         )
 
-    # Layer 1: ignore echoed messages from the bot's own number
     metadata = value.get("metadata", {})
     bot_phone = metadata.get("display_phone_number", "").replace("+", "")
     sender = message.get("from", "")
     if sender and bot_phone and sender == bot_phone:
         log.info(f"Ignoring own message echo from bot number {sender}")
-        return {"status": "own message"}
+        return
 
     msg_id = message.get("id", "")
     if _is_duplicate(msg_id):
         log.info(f"Duplicate message {msg_id}, skipping")
-        return {"status": "duplicate"}
+        return
 
     msg_type = message.get("type", "")
-
-    # Layer 2: log message text content for diagnostics
     text_preview = ""
     if msg_type == "text":
         text_preview = message.get("text", {}).get("body", "")
@@ -255,7 +297,6 @@ async def receive_webhook(request: Request):
         f"text={text_preview[:100]!r}"
     )
 
-    # Layer 4: warn if message arrives very soon after bot replied
     last_reply = _last_reply_time.get(sender, 0)
     gap = time.time() - last_reply
     if last_reply and gap < 5.0:
@@ -266,31 +307,26 @@ async def receive_webhook(request: Request):
 
     if sender not in ALLOWED_NUMBERS:
         log.info(f"Ignored: {sender} not in allowed list")
-        return {"status": "ignored"}
+        return
 
-    if msg_type == "audio":
-        await handle_audio(sender, message)
-    elif msg_type == "text":
-        text = message.get("text", {}).get("body", "")
-        await handle_chat(sender, text)
-    elif msg_type == "image":
-        await handle_image(sender, message)
-    elif msg_type == "document":
-        await handle_document(sender, message)
-    else:
-        await send_message(sender, f"Tipo '{msg_type}' ainda não suportado.")
-
-    return {"status": "ok"}
-
-
-_DOWNLOAD_KEYWORDS = re.compile(
-    r"\b(baixa|baixe|baixar|download|salva|salve|salvar|me manda|manda|pega)\b",
-    re.IGNORECASE,
-)
-
-
-def _is_download_intent(text: str) -> bool:
-    return bool(_DOWNLOAD_KEYWORDS.search(text))
+    try:
+        if msg_type == "audio":
+            await handle_audio(sender, message)
+        elif msg_type == "text":
+            text = message.get("text", {}).get("body", "")
+            await handle_chat(sender, text)
+        elif msg_type == "image":
+            await handle_image(sender, message)
+        elif msg_type == "document":
+            await handle_document(sender, message)
+        else:
+            await send_message(sender, f"Tipo '{msg_type}' ainda não suportado.")
+    except Exception:
+        log.exception(f"Failed to process {msg_type} from {sender}")
+        try:
+            await send_message(sender, "Erro ao processar sua mensagem. Tente de novo.")
+        except Exception:
+            log.exception("Failed to send error message")
 
 
 # phone -> original reminder text awaiting timezone confirmation
@@ -309,7 +345,7 @@ async def _resolve_tz_from_text(text: str) -> str | None:
     from aisha.config import OPENAI_API_KEY
     client = AsyncOpenAI(api_key=OPENAI_API_KEY)
     resp = await client.chat.completions.create(
-        model="gpt-4.1-mini",
+        model=EXTRACT_MODEL,
         messages=[
             {"role": "system", "content": _TZ_RESOLVE_SYSTEM},
             {"role": "user", "content": text},
@@ -345,6 +381,7 @@ async def get_or_ask_timezone(
 
     # Cannot determine — ask the user and park the reminder text
     _pending_timezone[sender] = reminder_text
+    _spawn(upsert_pending(sender, "timezone", {"reminder_text": reminder_text}, 600))
     return None
 
 
@@ -359,26 +396,6 @@ def _tz_question_message(inferred: str | None = None) -> str:
         "📍 Para criar lembretes com o horário certo, preciso saber onde você está.\n\n"
         "Me diz sua cidade ou país (ex: \"São Paulo\", \"Lisboa\", \"New York\")."
     )
-
-
-def _contains_aisha(text: str) -> bool:
-    return bool(re.search(r"\baisha\b", text, re.IGNORECASE))
-
-
-def _strip_aisha(text: str) -> str:
-    return re.sub(r"\baisha\b[,\s]*", "", text, count=1, flags=re.IGNORECASE).strip()
-
-
-_WANTS_TRANSCRIPTION_RE = re.compile(
-    r"(só\s+quer(ia|o)|quero\s+só|só\s+precis(ava|o)|era\s+só|só\s+era|"
-    r"não\s+precis(a|o)\s+responder|s[oó]\s+a?\s*transcri[çc][aã]o|"
-    r"transcrev(e|a)\s+(isso|a[íi]|o\s+áudio)|manda\s+(a\s+)?transcri[çc][aã]o)",
-    re.IGNORECASE,
-)
-
-
-def _is_retroactive_transcription_request(text: str) -> bool:
-    return bool(_WANTS_TRANSCRIPTION_RE.search(text))
 
 
 def _get_pending_description(sender: str) -> str | None:
@@ -405,6 +422,7 @@ def _clear_all_pendings(sender: str) -> None:
     clear_pending_video(sender)
     clear_pending_page(sender)
     clear_pending_document(sender)
+    _spawn(clear_all_pending(sender))
 
 
 async def _execute_pending(sender: str, text: str) -> bool:
@@ -498,18 +516,33 @@ async def _execute_pending(sender: str, text: str) -> bool:
     return False
 
 
+async def _hydrate_pendings(sender: str) -> None:
+    """Restore pending image/document/timezone from Supabase after a redeploy."""
+    if sender not in _pending_timezone:
+        row = await get_pending(sender, "timezone")
+        if row:
+            original = (row.get("payload") or {}).get("reminder_text")
+            if original:
+                _pending_timezone[sender] = original
+    await get_pending_image_async(sender)
+    await get_pending_document_async(sender)
+    yt_row = await get_pending(sender, "youtube")
+    if yt_row and not get_pending_video(sender):
+        url = (yt_row.get("payload") or {}).get("url")
+        if url:
+            from aisha.skills.youtube import store_pending_video
+            store_pending_video(sender, url)
+    page_row = await get_pending(sender, "webpage")
+    if page_row and not get_pending_page(sender):
+        url = (page_row.get("payload") or {}).get("url")
+        if url:
+            from aisha.skills.webpage import store_pending_page
+            store_pending_page(sender, url)
+
+
 async def handle_chat(sender: str, text: str):
-    """Routes a text message through Aisha chat (or reminder/youtube skill) and sends the response."""
-    if AGENTIC_MODE:
-        await _handle_chat_agentic(sender, text)
-    else:
-        await _handle_chat_legacy(sender, text)
-
-
-async def _handle_chat_agentic(sender: str, text: str):
-    """Agentic mode: model decides which tools to call autonomously."""
-    from aisha.agent import run_agent
-    from aisha.skills.chat import wants_new_session
+    """Routes a text message through pending states or the agentic loop."""
+    from aisha.agent import run_agent, run_fast_path
 
     if sender in _processing:
         log.info(f"User {sender} sent message while agent is busy — replying with wait message")
@@ -521,11 +554,30 @@ async def _handle_chat_agentic(sender: str, text: str):
 
     try:
         if _is_retroactive_transcription_request(text):
-            raw = pop_raw_transcription(sender)
+            raw = await pop_raw_transcription_async(sender)
             if raw:
                 log.info(f"Retroactive transcription request for {sender}")
                 await _send_refined_transcription(sender, raw)
                 return
+
+        await _hydrate_pendings(sender)
+        pending_desc = _get_pending_description(sender)
+        if pending_desc:
+            decision = await classify_pending_response(text, pending_desc)
+            log.info(f"Pending triage for {sender}: {decision} (pending={pending_desc[:60]})")
+            if decision == "CANCEL":
+                _clear_all_pendings(sender)
+                await send_message(
+                    sender,
+                    "Sem problema! Pode ignorar a mensagem anterior.\n\n"
+                    "Se precisar de algo, é só falar.",
+                )
+                return
+            if decision == "NEW_INTENT":
+                _clear_all_pendings(sender)
+            elif decision == "CONTINUE":
+                if await _execute_pending(sender, text):
+                    return
 
         if wants_new_session(text):
             await delete_session(sender)
@@ -533,14 +585,17 @@ async def _handle_chat_agentic(sender: str, text: str):
 
         _processing.add(sender)
         await send_message(sender, "⏳ Processando...")
-
         prev_id = await get_response_id(sender)
-        result = await run_agent(
-            user_input=text,
-            previous_response_id=prev_id,
-            phone=sender,
-            scheduler=scheduler,
-        )
+
+        if is_trivial_message(text):
+            result = await run_fast_path(text, previous_response_id=prev_id, phone=sender)
+        else:
+            result = await run_agent(
+                user_input=text,
+                previous_response_id=prev_id,
+                phone=sender,
+                scheduler=scheduler,
+            )
 
         if result.response_id:
             await upsert_session(sender, result.response_id)
@@ -548,7 +603,6 @@ async def _handle_chat_agentic(sender: str, text: str):
             await send_image(sender, result.image_bytes)
         if result.text:
             await send_message(sender, result.text)
-
         if result.tools_called:
             for tool_name in result.tools_called:
                 await increment_stat(sender, f"tool_{tool_name}")
@@ -558,178 +612,6 @@ async def _handle_chat_agentic(sender: str, text: str):
         await send_message(sender, f"Erro no chat: {e}")
     finally:
         _processing.discard(sender)
-
-
-async def _handle_chat_legacy(sender: str, text: str):
-    """Legacy mode: classifier + if/elif routing (original implementation)."""
-    try:
-        # 0. Retroactive transcription request ("eu só queria a transcrição mesmo")
-        if _is_retroactive_transcription_request(text):
-            raw = pop_raw_transcription(sender)
-            if raw:
-                log.info(f"Retroactive transcription request for {sender} — refining stored raw text")
-                await _send_refined_transcription(sender, raw)
-                return
-
-        # 1. Pending state triage — classify user reply as CONTINUE / CANCEL / NEW_INTENT
-        pending_desc = _get_pending_description(sender)
-        if pending_desc:
-            decision = await classify_pending_response(text, pending_desc)
-            log.info(f"Pending triage for {sender}: {decision} (pending={pending_desc[:60]})")
-
-            if decision == "CANCEL":
-                _clear_all_pendings(sender)
-                await send_message(
-                    sender,
-                    "Sem problema! Pode ignorar a mensagem anterior.\n\n"
-                    "Se precisar de algo, é só falar.",
-                )
-                return
-
-            if decision == "NEW_INTENT":
-                _clear_all_pendings(sender)
-                # Fall through to normal flow below
-
-            elif decision == "CONTINUE":
-                if await _execute_pending(sender, text):
-                    return
-
-        # 2. Video download URL (YouTube or X/Twitter with "baixa"/"download" intent in new message)
-        video_url = extract_video_url(text)
-        if video_url and _is_download_intent(text):
-            log.info(f"Video download intent for {sender}: {video_url}")
-            await send_message(sender, "⏳ Baixando vídeo...")
-            try:
-                token, filename = await download_video(video_url)
-                link = f"{BASE_URL}/download/{token}"
-                await send_message(
-                    sender,
-                    f"✅ *{filename}*\n\n"
-                    f"🔗 Link de download (expira em 30 min):\n{link}",
-                )
-                await increment_stat(sender, "video_downloads")
-            except Exception as exc:
-                log.exception("Video download failed")
-                await send_message(sender, f"Não consegui baixar o vídeo: {exc}")
-            return
-
-        # 3. YouTube URL in current message
-        yt_url = extract_youtube_url(text)
-        if yt_url:
-            instruction = strip_youtube_url(text)
-            if instruction:
-                log.info(f"YouTube URL + instruction for {sender}: {yt_url}")
-                await send_message(sender, "⏳ Analisando vídeo...")
-                await increment_stat(sender, "youtube")
-                reply = await analyze_video(yt_url, instruction)
-                await send_message(sender, reply)
-            else:
-                # No instruction — store and ask what to do
-                store_pending_video(sender, yt_url)
-                log.info(f"YouTube URL stored for {sender}: {yt_url}")
-                await send_message(
-                    sender,
-                    "🎬 Link do YouTube detectado! O que você quer que eu faça com esse vídeo?\n\n"
-                    "Exemplos:\n"
-                    "• _Faz um resumo_\n"
-                    "• _Transcreve o vídeo_\n"
-                    "• _Quais são os pontos principais?_\n"
-                    "• _Explica os conceitos mencionados_\n"
-                    "• _Baixa o vídeo_",
-                )
-            return
-
-        # 4. Web URL in current message
-        web_url = extract_web_url(text)
-        if web_url:
-            instruction = strip_web_url(text)
-            if instruction:
-                log.info(f"Web URL + instruction for {sender}: {web_url}")
-                await send_message(sender, "⏳ Lendo página...")
-                await increment_stat(sender, "webpages")
-                try:
-                    content = await fetch_page(web_url)
-                    prev_id = await get_response_id(sender)
-                    result = await chat_with_webpage(content, web_url, instruction, prev_id)
-                    if result.response_id:
-                        await upsert_session(sender, result.response_id)
-                    if result.text:
-                        await send_message(sender, result.text)
-                except Exception as e:
-                    log.exception("Webpage processing failed")
-                    await send_message(sender, f"Não consegui acessar a página: {e}")
-            else:
-                # No instruction — store and ask what to do
-                store_pending_page(sender, web_url)
-                log.info(f"Web URL stored for {sender}: {web_url}")
-                await send_message(
-                    sender,
-                    "🔗 Link detectado! O que você quer que eu faça com essa página?\n\n"
-                    "Exemplos:\n"
-                    "• _Resume essa notícia_\n"
-                    "• _Traduz para inglês_\n"
-                    "• _Quais são os pontos principais?_\n"
-                    "• _Explica de forma simples_",
-                )
-            return
-
-        # 5. Classify intent (LLM) — single call routes to skill or chat
-        intent = await classify(text)
-        log.info(f"Classified as {intent}: {text[:80]}")
-
-        if intent == "SCHEDULED_TASK":
-            log.info(f"Scheduled task intent for {sender}")
-            task_tz = await get_or_ask_timezone(sender, text)
-            if task_tz is None:
-                await send_message(sender, _tz_question_message())
-                return
-            reply = await handle_scheduled_task(sender, text, scheduler, task_tz)
-            if "✅ Tarefa agendada criada" in reply:
-                await increment_stat(sender, "scheduled_tasks_created")
-            await send_message(sender, reply)
-            return
-
-        if intent == "REMINDER":
-            log.info(f"Reminder intent for {sender}")
-            user_tz = await get_or_ask_timezone(sender, text)
-            if user_tz is None:
-                await send_message(sender, _tz_question_message())
-                return
-            reply = await handle_reminder(sender, text, scheduler, user_tz)
-            if "✅ Lembrete criado" in reply:
-                await increment_stat(sender, "reminders_created")
-            await send_message(sender, reply)
-            return
-
-        # 6. Chat (SELF / SIMPLE / COMPLEX)
-        if wants_new_session(text):
-            await delete_session(sender)
-            log.info(f"Session reset requested by {sender}")
-
-        prev_id = await get_response_id(sender)
-        result = await chat(
-            text, previous_response_id=prev_id, phone=sender, complexity=intent,
-        )
-
-        if result.response_id:
-            await upsert_session(sender, result.response_id)
-
-        if result.image_bytes:
-            await send_image(sender, result.image_bytes)
-        if result.text:
-            await send_message(sender, result.text)
-    except Exception as e:
-        log.exception("Chat failed")
-        await send_message(sender, f"Erro no chat: {e}")
-
-
-def _is_transcription_request(text: str) -> bool:
-    """Returns True if the raw transcription explicitly asks Aisha to transcribe."""
-    return bool(re.search(
-        r"\baisha\b.{0,40}\bTranscreva\b",
-        text,
-        re.IGNORECASE | re.DOTALL,
-    ))
 
 
 async def _send_refined_transcription(sender: str, raw_text: str) -> None:
@@ -807,27 +689,19 @@ async def handle_audio(sender: str, message: dict):
         log.info(f"Routing to chat (new_session={is_new_session}, has_aisha={has_aisha})")
         store_raw_transcription(sender, raw_text)
 
-        if AGENTIC_MODE:
-            from aisha.agent import run_agent
-            _processing.add(sender)
-            try:
-                result = await run_agent(
-                    user_input=user_input,
-                    previous_response_id=prev_id,
-                    phone=sender,
-                    scheduler=scheduler,
-                )
-            finally:
-                _processing.discard(sender)
-        else:
-            result = await chat(user_input, previous_response_id=prev_id, phone=sender)
+        from aisha.agent import run_agent
+        _processing.add(sender)
+        try:
+            result = await run_agent(
+                user_input=user_input,
+                previous_response_id=prev_id,
+                phone=sender,
+                scheduler=scheduler,
+            )
+        finally:
+            _processing.discard(sender)
 
-        if result.response_id:
-            await upsert_session(sender, result.response_id)
-        if result.image_bytes:
-            await send_image(sender, result.image_bytes)
-        if result.text:
-            await send_message(sender, result.text)
+        await _deliver_agent_result(sender, result)
     except Exception as e:
         log.exception("Audio processing failed")
         await send_message(sender, f"Erro ao processar áudio: {e}")
@@ -864,14 +738,13 @@ async def handle_image(sender: str, message: dict):
         await increment_stat(sender, "images")
 
         caption = message["image"].get("caption", "").strip()
-        if caption:
-            log.info(f"Image has caption — using as instruction: {caption[:80]}")
-            pending = get_pending_image(sender)
-            if pending:
-                await _process_image_instruction(sender, caption, pending)
-            return
-
-        await send_message(sender, "📷 O que você quer que eu faça com esta imagem?")
+        instruction = caption or (
+            "O usuário enviou esta imagem sem instrução. "
+            "Pergunte o que deseja fazer com ela."
+        )
+        pending = get_pending_image(sender)
+        if pending:
+            await _process_image_instruction(sender, instruction, pending)
     except Exception as e:
         log.exception("Image handling failed")
         await send_message(sender, f"Erro ao processar imagem: {e}")
@@ -944,46 +817,39 @@ async def handle_document(sender: str, message: dict):
             return
 
         caption = doc.get("caption", "").strip()
-        prev_id = await get_response_id(sender)
-        result = await chat_with_document(document_text, caption or None, prev_id)
-
-        if result.response_id:
-            await upsert_session(sender, result.response_id)
-
-        if result.text:
-            await send_message(sender, result.text)
+        await _run_document_agent(sender, document_text, caption or None)
 
     except Exception as e:
         log.exception("Document processing failed")
         await send_message(sender, f"Erro ao processar documento: {e}")
 
 
-def _parse_page_selection(text: str, total_pages: int) -> list[int] | None:
-    """Parse a user's page selection text into a list of 0-based page indices.
+async def _deliver_agent_result(sender: str, result) -> None:
+    if result.response_id:
+        await upsert_session(sender, result.response_id)
+    if result.image_bytes:
+        await send_image(sender, result.image_bytes)
+    if result.text:
+        await send_message(sender, result.text)
+    if getattr(result, "tools_called", None):
+        for tool_name in result.tools_called:
+            await increment_stat(sender, f"tool_{tool_name}")
 
-    Accepts formats like "página 3", "páginas 1 a 5", "páginas 2, 4 e 7".
-    Returns None if nothing could be parsed.
-    """
-    text_lower = text.lower()
-    indices: set[int] = set()
 
-    # Range: "1 a 5", "de 2 a 8"
-    range_match = re.search(r"(\d+)\s+a\s+(\d+)", text_lower)
-    if range_match:
-        start, end = int(range_match.group(1)), int(range_match.group(2))
-        indices.update(range(start - 1, end))
+async def _run_document_agent(sender: str, document_text: str, instruction: str | None) -> None:
+    from aisha.agent import run_agent
 
-    # Individual numbers (also catches numbers inside ranges, so deduplicate)
-    for m in re.finditer(r"\d+", text_lower):
-        n = int(m.group())
-        if 1 <= n <= total_pages:
-            indices.add(n - 1)
-
-    if not indices:
-        return None
-
-    valid = sorted(i for i in indices if 0 <= i < total_pages)
-    return valid[:MAX_SCANNED_PAGES]  # enforce limit even on manual selection
+    user_message = f"DOCUMENTO:\n\n{document_text}"
+    if instruction:
+        user_message = f"INSTRUÇÃO: {instruction}\n\n{user_message}"
+    prev_id = await get_response_id(sender)
+    result = await run_agent(
+        user_input=user_message,
+        previous_response_id=prev_id,
+        phone=sender,
+        scheduler=scheduler,
+    )
+    await _deliver_agent_result(sender, result)
 
 
 async def _process_document_pages(sender: str, text: str, pending):
@@ -997,7 +863,6 @@ async def _process_document_pages(sender: str, text: str, pending):
             "Não entendi quais páginas você quer. "
             "Me diga assim: _\"páginas 1 a 5\"_, _\"página 3\"_ ou _\"páginas 2, 4 e 7\"_.",
         )
-        # Restore pending so the user can try again
         store_pending_document(sender, pending.pdf_bytes, pending.total_pages, pending.caption)
         return
 
@@ -1009,35 +874,37 @@ async def _process_document_pages(sender: str, text: str, pending):
         await send_message(sender, "Não consegui extrair texto dessas páginas.")
         return
 
-    prev_id = await get_response_id(sender)
-    result = await chat_with_document(document_text, pending.caption, prev_id)
-
-    if result.response_id:
-        await upsert_session(sender, result.response_id)
-    if result.text:
-        await send_message(sender, result.text)
+    await _run_document_agent(sender, document_text, pending.caption)
 
 
 async def _process_image_instruction(sender: str, instruction: str, pending):
-    """Sends the pending image + instruction to the AI and delivers the result."""
+    """Sends the pending image + instruction to the agent and delivers the result."""
+    from aisha.agent import run_agent
+
     clear_pending_image(sender)
     await send_message(sender, "⏳ Processando imagem...")
 
+    b64 = base64.b64encode(pending.image_bytes).decode()
+    multimodal_input = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_image",
+                    "image_url": f"data:{pending.mime_type};base64,{b64}",
+                },
+                {"type": "input_text", "text": instruction},
+            ],
+        }
+    ]
     prev_id = await get_response_id(sender)
-    result = await chat_with_image(
-        instruction,
-        pending.image_bytes,
-        pending.mime_type,
+    result = await run_agent(
+        user_input=multimodal_input,
         previous_response_id=prev_id,
+        phone=sender,
+        scheduler=scheduler,
     )
-
-    if result.response_id:
-        await upsert_session(sender, result.response_id)
-
-    if result.image_bytes:
-        await send_image(sender, result.image_bytes)
-    if result.text:
-        await send_message(sender, result.text)
+    await _deliver_agent_result(sender, result)
 
 
 async def send_message(to: str, text: str):

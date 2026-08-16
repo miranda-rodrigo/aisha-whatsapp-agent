@@ -10,6 +10,7 @@ from pathlib import Path
 from openai import AsyncOpenAI
 
 from aisha.config import OPENAI_API_KEY
+from aisha.models import DOCUMENT_MODEL, VISION_OCR_MODEL
 
 log = logging.getLogger(__name__)
 
@@ -94,7 +95,7 @@ async def extract_scanned_pages(
         content.append({"type": "input_image", "image_url": f"data:image/png;base64,{b64}"})
 
     response = await _client.responses.create(
-        model="gpt-4.1",
+        model=VISION_OCR_MODEL,
         input=[{"role": "user", "content": content}],
     )
 
@@ -182,7 +183,7 @@ async def summarize_document(
         user_message = f"INSTRUÇÃO DO USUÁRIO: {user_instruction}\n\n{user_message}"
 
     response = await _client.chat.completions.create(
-        model="gpt-4.1",
+        model=DOCUMENT_MODEL,
         messages=[
             {"role": "system", "content": _SUMMARIZE_PROMPT},
             {"role": "user", "content": user_message},
