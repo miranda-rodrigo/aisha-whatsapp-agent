@@ -495,7 +495,39 @@ A Aisha escolhe automaticamente o melhor modelo para cada tarefa — você não 
 | Resumo de documentos PDF/DOCX e OCR | `gpt-5.6-terra` |
 | Análise de vídeo YouTube | `gemini-3.6-flash` (fallback: `gemini-2.5-flash`); vídeo longo: legendas ou Whisper + TXT |
 | Leitura de páginas web | Jina Reader + `gpt-5.6-terra` |
+| Mapa com raio | Nominatim + tiles OSM + PyMuPDF, tool `draw_radius_map` |
 | Memória de longo prazo | `text-embedding-3-small` + tools `save_memory` / `forget_memory` |
+
+---
+
+## 15. Mapa com raio (círculo em torno de um ponto)
+
+A Aisha monta um **mapa real** (OpenStreetMap) com um círculo do raio que você pedir, centrado no endereço.
+
+### Como usar
+
+```
+"mapa de 2 km em torno da Av. Beira Mar 123, Fortaleza"
+"desenha um círculo de 500 metros em torno do Shopping Benfica"
+"raio de 5 km a partir da Praça do Ferreira"
+```
+
+**Resposta da Aisha:**
+- Uma **imagem** do mapa com o ponto marcado e o círculo do raio
+- Texto com o endereço encontrado, coordenadas, o raio e um link para abrir no Google Maps
+
+### Unidades
+
+- `m` / metros, `km` / quilômetros, `mi` / milhas
+- Se você só disser o número (`raio de 2`), ela assume **quilômetros** e avisa
+
+### Observações
+
+- O raio precisa estar entre **50 m e 50 km**
+- Se o endereço for ambíguo, ela lista as opções e pergunta qual usar
+- Se faltar o endereço ou o raio, ela pergunta o que falta
+- Follow-up funciona: *"agora com 5 km"* reusa o último ponto
+- Isso **não** é uma imagem gerada por IA — o mapa é geográfico de verdade
 
 ---
 

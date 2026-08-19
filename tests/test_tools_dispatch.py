@@ -36,6 +36,7 @@ class ToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             "analyze_youtube_video",
             "download_video",
             "search_x",
+            "draw_radius_map",
         ):
             self.assertIn(required, names)
 

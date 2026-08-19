@@ -1,6 +1,6 @@
 # Aisha — Assistente Pessoal via WhatsApp
 
-Aisha é uma assistente pessoal orientada a tarefas que roda no WhatsApp Business API. Ela não é um chatbot para bate-papo — seu papel é executar ações concretas: transcrever áudios, pesquisar na web, gerar imagens, criar lembretes, agendar tarefas recorrentes, analisar documentos e vídeos do YouTube — tudo pelo WhatsApp.
+Aisha é uma assistente pessoal orientada a tarefas que roda no WhatsApp Business API. Ela não é um chatbot para bate-papo — seu papel é executar ações concretas: transcrever áudios, pesquisar na web, gerar imagens, criar lembretes, agendar tarefas recorrentes, analisar documentos e vídeos do YouTube, e montar mapas com raio — tudo pelo WhatsApp.
 
 ## Missão e princípios
 
@@ -117,6 +117,13 @@ Aisha é uma assistente pessoal orientada a tarefas que roda no WhatsApp Busines
 - Funciona com artigos, notícias, blogs e documentações
 - Exemplos de uso: resumo, tradução, extração de dados, explicação simplificada, post para LinkedIn
 
+### Mapa com raio (círculo em torno de um ponto)
+- Informe um endereço e um raio; a Aisha envia um mapa real (OpenStreetMap) com o círculo desenhado
+- Unidades: metros, km (padrão se você só mandar o número) ou milhas; faixa de 50 m a 50 km
+- Se o endereço for ambíguo, ela lista as opções. Follow-up ("agora com 5 km") reusa o último ponto
+- Não usa geração de imagem por IA — geocodifica no Nominatim e desenha o raio sobre tiles OSM
+- Exemplos: "mapa de 2 km em torno da Av. Beira Mar 123, Fortaleza"
+
 ### Lembretes
 - Criação via linguagem natural em português
 - Aviso enviado por WhatsApp X minutos antes do evento (padrão: 15 min)
@@ -194,7 +201,7 @@ handle_chat (texto)
         ├── 2. saudação trivial? ──► gpt-5.6-luna (sem tools)
         └── 3. agente (gpt-5.6-terra)
                     └── loop de tools (até 10 iterações, em paralelo)
-                          ├── web_search / search_x / image_generation
+                          ├── web_search / search_x / image_generation / draw_radius_map
                           ├── lembretes e tarefas agendadas
                           ├── YouTube / webpage / download
                           └── memória (save / search / list / forget)
@@ -245,6 +252,7 @@ whatsapp-agent/
 | LLM refinamento | Google Gemini 3.6 Flash (fallback: 2.5 Flash) |
 | Transcrição | OpenAI Whisper (whisper-1) |
 | Geração/edição de imagem | image_generation (Responses API) |
+| Mapa com raio | Nominatim + tiles OSM + PyMuPDF (`draw_radius_map`) |
 | Busca na web | Ferramenta nativa da Responses API |
 | Busca no X (Twitter) | xAI Grok `x_search` via tool `search_x` |
 | Memória de longo prazo | Embeddings text-embedding-3-small + tabela memories |
