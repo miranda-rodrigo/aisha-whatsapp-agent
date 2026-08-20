@@ -84,7 +84,9 @@ def _build_system_prompt(
         "faça UMA pergunta objetiva e não chame a tool. Follow-up ('agora com 5 km') reusa o ponto.",
         "- Se draw_radius_map devolver status=ambiguous, liste os candidatos e pergunte qual usar. "
         "Se status=ok, o PNG já é enviado automaticamente — responda com endereço, coordenadas, "
-        "raio, area_label e maps_url. Se unit_assumed=km, diga que interpretou o raio em quilômetros.",
+        "raio, area_label e maps_url. Se unit_assumed=km, diga que interpretou o raio em quilômetros. "
+        "NÃO diga que o serviço de mapas está 'temporariamente sem configuração'. "
+        "Se source=osm, o mapa saiu mesmo assim — não peça chave nem peça desculpa.",
         "- Quando o usuário pedir um lembrete, verifique os LEMBRETES ATIVOS abaixo antes de agir:",
         "    * Se já existe um lembrete sobre o mesmo assunto/evento, use edit_reminder.",
         "    * Só use create_reminder se o lembrete é claramente novo.",

@@ -502,7 +502,7 @@ A Aisha escolhe automaticamente o melhor modelo para cada tarefa — você não 
 
 ## 15. Mapa com raio (círculo em torno de um ponto)
 
-A Aisha monta um **mapa real** (Google Maps, visual CalcMaps) com um círculo azul do raio que você pedir, centrado no endereço.
+A Aisha monta um **mapa real** com um círculo azul do raio que você pedir, centrado no endereço. Com `GOOGLE_MAPS_API_KEY` no servidor, o visual é Google Maps (CalcMaps). Sem a chave, o mesmo círculo sai sobre OpenStreetMap.
 
 ### Como usar
 
@@ -513,7 +513,7 @@ A Aisha monta um **mapa real** (Google Maps, visual CalcMaps) com um círculo az
 ```
 
 **Resposta da Aisha:**
-- Uma **imagem** do mapa (ruas Google, pino vermelho, círculo azul)
+- Uma **imagem** do mapa (pino vermelho, círculo azul; ruas Google se a chave estiver configurada)
 - Texto com o endereço encontrado, coordenadas, o raio, a área do círculo e um link para abrir no Google Maps
 
 ### Unidades
@@ -527,8 +527,8 @@ A Aisha monta um **mapa real** (Google Maps, visual CalcMaps) com um círculo az
 - Se o endereço for ambíguo, ela lista as opções e pergunta qual usar
 - Se faltar o endereço ou o raio, ela pergunta o que falta
 - Follow-up funciona: *"agora com 5 km"* reusa o último ponto
-- Isso **não** é uma imagem gerada por IA — o mapa vem da Google Maps Static API
-- Requer `GOOGLE_MAPS_API_KEY` no servidor (Maps Static API ativada no Google Cloud)
+- Isso **não** é uma imagem gerada por IA
+- Com `GOOGLE_MAPS_API_KEY` (Maps Static API no Google Cloud) o PNG vem do Google; sem ela, OpenStreetMap
 
 ---
 
