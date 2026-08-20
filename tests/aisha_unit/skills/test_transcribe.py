@@ -60,7 +60,7 @@ class TranscribeCommandTests(TestCase):
 
     def test_small_compatible_audio_skips_mp3_recode(self):
         with (
-            patch.object(transcribe, "OpenAI") as openai,
+            patch.object(transcribe, "_client") as client,
             patch.object(transcribe, "_convert_to_mp3") as convert,
             patch.object(
                 transcribe, "_transcribe_file", return_value="texto"
@@ -70,15 +70,15 @@ class TranscribeCommandTests(TestCase):
             result = transcribe._transcribe_sync(b"ogg-bytes", "audio/ogg")
 
         self.assertEqual(result, "texto")
-        openai.assert_called_once_with(api_key=transcribe.OPENAI_API_KEY)
         convert.assert_not_called()
         split.assert_not_called()
         transcribe_file.assert_called_once()
+        self.assertIs(transcribe_file.call_args.args[0], client)
         self.assertEqual(transcribe_file.call_args.args[1].suffix, ".ogg")
 
     def test_small_mp3_is_transcribed_once_without_recode(self):
         with (
-            patch.object(transcribe, "OpenAI") as openai,
+            patch.object(transcribe, "_client") as client,
             patch.object(transcribe, "_convert_to_mp3") as convert,
             patch.object(
                 transcribe, "_transcribe_file", return_value="texto"
@@ -88,10 +88,10 @@ class TranscribeCommandTests(TestCase):
             result = transcribe._transcribe_sync(b"audio", "audio/mpeg")
 
         self.assertEqual(result, "texto")
-        openai.assert_called_once_with(api_key=transcribe.OPENAI_API_KEY)
         convert.assert_not_called()
         transcribe_file.assert_called_once()
         split.assert_not_called()
+        self.assertIs(transcribe_file.call_args.args[0], client)
         self.assertEqual(transcribe_file.call_args.args[1].suffix, ".mp3")
 
     def test_oversize_file_is_converted(self):
@@ -99,7 +99,7 @@ class TranscribeCommandTests(TestCase):
             destination.write_bytes(b"mp3")
 
         with (
-            patch.object(transcribe, "OpenAI"),
+            patch.object(transcribe, "_client") as client,
             patch.object(transcribe, "_convert_to_mp3", side_effect=fake_convert) as convert,
             patch.object(transcribe, "_should_send_raw", return_value=False),
             patch.object(
@@ -113,6 +113,7 @@ class TranscribeCommandTests(TestCase):
         convert.assert_called_once()
         transcribe_file.assert_called_once()
         split.assert_not_called()
+        self.assertIs(transcribe_file.call_args.args[0], client)
         self.assertEqual(transcribe_file.call_args.args[1].suffix, ".mp3")
 
 

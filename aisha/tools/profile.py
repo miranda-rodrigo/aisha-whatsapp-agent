@@ -39,14 +39,26 @@ async def tool_set_language(args: dict, ctx: ToolContext) -> str:
 
 
 async def tool_get_my_profile(args: dict, ctx: ToolContext) -> str:
+    import asyncio
     from aisha.user_profile import get_profile
+    from aisha.skills.memory_store import list_memories
     from aisha.skills.reminder_store import get_reminders
     from aisha.skills.scheduled_task_store import get_tasks
     from datetime import datetime
 
-    profile = await get_profile(ctx.phone)
-    reminders = await get_reminders(ctx.phone)
-    tasks = await get_tasks(ctx.phone)
+    async def _safe_memories() -> list[dict]:
+        try:
+            return await list_memories(ctx.phone)
+        except Exception:
+            log.warning("Failed to list memories for profile", exc_info=True)
+            return []
+
+    profile, reminders, tasks, memories = await asyncio.gather(
+        get_profile(ctx.phone),
+        get_reminders(ctx.phone),
+        get_tasks(ctx.phone),
+        _safe_memories(),
+    )
 
     ctx_text = (profile.get("personal_context") or "nenhum definido") if profile else "nenhum definido"
     lang = (profile.get("language") or "nenhum definido") if profile else "nenhum definido"
@@ -68,14 +80,6 @@ async def tool_get_my_profile(args: dict, ctx: ToolContext) -> str:
             "name": t["name"],
             "cron_expression": t["cron_expression"],
         })
-
-    from aisha.skills.memory_store import list_memories
-
-    memories = []
-    try:
-        memories = await list_memories(ctx.phone)
-    except Exception:
-        log.warning("Failed to list memories for profile", exc_info=True)
 
     return json.dumps({
         "personal_context": ctx_text,

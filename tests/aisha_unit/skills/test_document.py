@@ -47,7 +47,7 @@ class DocumentExtractionTests(IsolatedAsyncioTestCase):
                 "docx",
             )
 
-        pdf.assert_awaited_once_with(b"pdf")
+        pdf.assert_awaited_once_with(b"pdf", None)
         to_thread.assert_awaited_once_with(document._extract_docx_text, b"docx")
 
     async def test_extract_text_rejects_unknown_mime(self):

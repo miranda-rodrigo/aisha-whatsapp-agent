@@ -101,8 +101,11 @@ async def upsert_language(phone: str, language: str) -> None:
 
 
 async def increment_stat(phone: str, key: str) -> None:
-    """Increment a usage counter in the stats JSONB field atomically via Supabase RPC."""
-    invalidate_profile_cache(phone)
+    """Increment a usage counter in the stats JSONB field atomically via Supabase RPC.
+
+    Não invalida o cache de perfil: stats não afetam timezone/idioma/contexto,
+    e invalidar aqui anulava o TTL de 60s em praticamente toda mensagem.
+    """
     client = get_client()
     resp = await client.post(
         f"{SUPABASE_URL}/rest/v1/rpc/increment_stat",
