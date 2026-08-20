@@ -13,6 +13,9 @@ from openai import OpenAI
 from aisha.config import OPENAI_API_KEY
 from aisha.models import WHISPER_MODEL
 
+# Reused across transcriptions to avoid a new connection pool per audio.
+_client = OpenAI(api_key=OPENAI_API_KEY)
+
 MAX_FILE_SIZE = 24 * 1024 * 1024  # 24 MB safety margin for Whisper's 25 MB limit
 CHUNK_DURATION_SECONDS = 600  # 10 minutes per chunk
 WHISPER_WORKERS = 6
@@ -146,7 +149,7 @@ def _transcribe_file(client: OpenAI, audio_path: Path) -> str:
 
 def _transcribe_sync(audio_bytes: bytes, mime_type: str) -> str:
     """Synchronous transcription pipeline: skip recode when possible, chunk if needed."""
-    client = OpenAI(api_key=OPENAI_API_KEY)
+    client = _client
     ext = MIME_TO_EXT.get(mime_type, ".ogg")
 
     with tempfile.TemporaryDirectory() as tmp_dir:

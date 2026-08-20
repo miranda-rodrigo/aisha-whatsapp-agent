@@ -1,5 +1,6 @@
 """Reminder skill for Aisha: create, list, cancel, edit reminders."""
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -7,8 +8,7 @@ from typing import Literal
 from urllib.parse import urlencode
 
 import dateparser
-import httpx
-from apscheduler import AsyncScheduler
+from apscheduler import AsyncScheduler, ConflictPolicy
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from openai import AsyncOpenAI
@@ -19,7 +19,6 @@ from aisha.config import (
     OPENAI_API_KEY,
     REMINDER_LEAD_MINUTES,
     USER_TIMEZONE,
-    WHATSAPP_TOKEN,
 )
 from aisha.models import EXTRACT_MODEL, OPENAI_SERVICE_TIER
 from aisha.skills.reminder_store import (
@@ -31,6 +30,7 @@ from aisha.skills.reminder_store import (
     update_job_id,
     update_reminder,
 )
+from aisha.whatsapp_http import get_client as get_whatsapp_client
 
 log = logging.getLogger(__name__)
 
@@ -146,14 +146,15 @@ def _parse_dt_raw(raw: str, user_tz: str) -> datetime | None:
     return dt
 
 
-def _resolve_dt(iso: str | None, raw: str | None, user_tz: str) -> datetime | None:
+async def _resolve_dt(iso: str | None, raw: str | None, user_tz: str) -> datetime | None:
     """Resolve datetime preferring the LLM-provided ISO value, falling back to dateparser."""
     if iso:
         dt = _parse_dt_iso(iso, user_tz)
         if dt:
             return dt
     if raw:
-        return _parse_dt_raw(raw, user_tz)
+        # dateparser is CPU-heavy; keep it off the event loop.
+        return await asyncio.to_thread(_parse_dt_raw, raw, user_tz)
     return None
 
 
@@ -181,26 +182,37 @@ async def _extract(text: str, user_tz: str) -> ReminderExtraction:
 
 async def _send_whatsapp(phone: str, message: str) -> None:
     """Send a WhatsApp message from within the scheduler job."""
-    async with httpx.AsyncClient(
-        headers={"Authorization": f"Bearer {WHATSAPP_TOKEN}"},
-        timeout=30.0,
-    ) as client:
-        await client.post(
-            f"{GRAPH_API_URL}/messages",
-            json={
-                "messaging_product": "whatsapp",
-                "to": phone,
-                "type": "text",
-                "text": {"body": message},
-            },
-        )
+    client = get_whatsapp_client()
+    await client.post(
+        f"{GRAPH_API_URL}/messages",
+        json={
+            "messaging_product": "whatsapp",
+            "to": phone,
+            "type": "text",
+            "text": {"body": message},
+        },
+    )
 
 
-async def _fire_reminder(phone: str, reminder_id: str, message: str) -> None:
-    """Called by APScheduler when a reminder fires."""
+async def _fire_reminder(
+    phone: str,
+    reminder_id: str,
+    message: str,
+    is_recurring: bool = False,
+    event_display: str | None = None,
+) -> None:
+    """Called by APScheduler when a reminder fires.
+
+    ``is_recurring``/``event_display`` default for schedules persisted
+    before these kwargs existed.
+    """
     log.info(f"Firing reminder {reminder_id} for {phone}")
-    await _send_whatsapp(phone, f"⏰ Lembrete: {message}")
-    await mark_sent(reminder_id)
+    text = f"⏰ Lembrete: {message}"
+    if event_display:
+        text += f" ({event_display})"
+    await _send_whatsapp(phone, text)
+    if not is_recurring:
+        await mark_sent(reminder_id)
 
 
 async def _schedule_job(
@@ -212,27 +224,79 @@ async def _schedule_job(
     is_recurring: bool,
     rrule: str | None,
     scheduler: AsyncScheduler,
+    user_tz: str = USER_TIMEZONE,
 ) -> str:
     """Schedule the reminder job and return the APScheduler schedule_id."""
     fire_at = scheduled_at - timedelta(minutes=lead_minutes)
+    event_display: str | None = None
 
     if is_recurring and rrule:
-        trigger = _rrule_to_trigger(rrule, fire_at)
+        trigger = _rrule_to_trigger(rrule, fire_at, user_tz, lead_minutes)
     else:
+        # A fire time already in the past (e.g. "me lembra em 5 min" with a
+        # 15-min lead) would be silently dropped by the misfire grace window.
+        # Fire right away instead.
+        now_utc = datetime.now(timezone.utc)
+        if fire_at <= now_utc:
+            fire_at = now_utc + timedelta(seconds=5)
         trigger = DateTrigger(run_time=fire_at)
+        event_display = _fmt_local(scheduled_at, user_tz)
 
     schedule_id = await scheduler.add_schedule(
         _fire_reminder,
         trigger,
         id=reminder_id,
-        kwargs={"phone": phone, "reminder_id": reminder_id, "message": message},
+        kwargs={
+            "phone": phone,
+            "reminder_id": reminder_id,
+            "message": message,
+            "is_recurring": is_recurring,
+            "event_display": event_display,
+        },
         misfire_grace_time=timedelta(seconds=120),
+        conflict_policy=ConflictPolicy.replace,
     )
     return str(schedule_id)
 
 
-def _rrule_to_trigger(rrule: str, first_fire: datetime) -> CronTrigger:
-    """Convert a simple RRULE string to an APScheduler CronTrigger."""
+def _shift_cron_by_lead(fields: list[str], lead_minutes: int) -> list[str]:
+    """Subtract lead from numeric hour/minute cron fields. Leave wildcards as-is."""
+    if lead_minutes <= 0:
+        return fields
+    minute, hour = fields[0], fields[1]
+    if not minute.isdigit() or not hour.isdigit():
+        return fields
+    total = (int(hour) * 60 + int(minute) - lead_minutes) % (24 * 60)
+    new_hour, new_min = divmod(total, 60)
+    return [str(new_min), str(new_hour), fields[2], fields[3], fields[4]]
+
+
+def _rrule_to_trigger(
+    rrule: str, first_fire: datetime, user_tz: str, lead_minutes: int = 0
+) -> CronTrigger:
+    """Convert an RRULE (or ``CRON:<expr>``) string to an APScheduler CronTrigger.
+
+    ``CRON:`` expressions describe the event time; ``lead_minutes`` shifts
+    numeric hour/minute so the job fires with the same advance notice as
+    one-shot reminders. RFC 5545 already uses ``first_fire`` (event − lead).
+    """
+    import zoneinfo
+
+    if rrule.startswith("CRON:"):
+        expr = rrule[len("CRON:"):].strip()
+        fields = expr.split()
+        if len(fields) == 5:
+            fields = _shift_cron_by_lead(fields, lead_minutes)
+            return CronTrigger(
+                minute=fields[0],
+                hour=fields[1],
+                day=fields[2],
+                month=fields[3],
+                day_of_week=fields[4],
+                timezone=user_tz,
+            )
+        log.warning(f"Invalid cron expression in rrule {rrule!r} — falling back to daily")
+
     parts = {k: v for k, v in (p.split("=") for p in rrule.split(";") if "=" in p)}
     freq = parts.get("FREQ", "DAILY")
     byday = parts.get("BYDAY", "")
@@ -241,10 +305,11 @@ def _rrule_to_trigger(rrule: str, first_fire: datetime) -> CronTrigger:
     day_map = {"MO": "mon", "TU": "tue", "WE": "wed", "TH": "thu",
                "FR": "fri", "SA": "sat", "SU": "sun"}
 
+    local_fire = first_fire.astimezone(zoneinfo.ZoneInfo(user_tz))
     kwargs: dict = {
-        "hour": first_fire.hour,
-        "minute": first_fire.minute,
-        "timezone": "UTC",
+        "hour": local_fire.hour,
+        "minute": local_fire.minute,
+        "timezone": user_tz,
     }
 
     if freq == "DAILY":
@@ -282,7 +347,7 @@ async def _handle_create(
     if not ex.datetime_iso and not ex.datetime_raw:
         return "Por favor, diga quando quer ser lembrado. Ex: 'me lembra da reunião amanhã às 10h'."
 
-    scheduled_at = _resolve_dt(ex.datetime_iso, ex.datetime_raw, user_tz)
+    scheduled_at = await _resolve_dt(ex.datetime_iso, ex.datetime_raw, user_tz)
     if not scheduled_at:
         return f"Não consegui entender o horário '{ex.datetime_raw}'. Tente ser mais específico, ex: 'amanhã às 10h'."
 
@@ -332,6 +397,7 @@ async def _handle_create(
         is_recurring=ex.is_recurring,
         rrule=ex.rrule,
         scheduler=scheduler,
+        user_tz=user_tz,
     )
     await update_job_id(reminder_id, job_id)
 
@@ -408,7 +474,7 @@ async def _handle_edit(
     if not iso and not raw:
         return "Por favor, diga o novo horário. Ex: 'muda o lembrete 1 para as 11h'."
 
-    new_dt = _resolve_dt(iso, raw, user_tz)
+    new_dt = await _resolve_dt(iso, raw, user_tz)
     if not new_dt:
         return f"Não consegui entender '{raw}'. Tente novamente."
 
@@ -432,8 +498,72 @@ async def _handle_edit(
         is_recurring=row.get("is_recurring", False),
         rrule=ex.rrule or row.get("rrule"),
         scheduler=scheduler,
+        user_tz=user_tz,
     )
     await update_job_id(row["id"], new_job_id)
 
     display = _fmt_local(new_dt, user_tz)
     return f"✅ Lembrete atualizado!\n📌 {row['message']}\n📅 {display}"
+
+
+# Só avisa lembretes atrasados perdidos há menos de 24h; mais antigos são
+# encerrados em silêncio para não inundar o usuário após um downtime longo.
+_LATE_NOTICE_MAX_AGE = timedelta(hours=24)
+
+
+async def restore_reminder_jobs(scheduler: AsyncScheduler) -> int:
+    """Re-arm pending reminders on startup and notify the ones missed during downtime.
+
+    APScheduler's persistent datastore keeps schedules across restarts, but a
+    one-shot reminder whose fire time passed while the app was down (beyond the
+    misfire grace window) is dropped silently and stays "pending" forever.
+    ``_schedule_job`` uses conflict_policy=replace so a leftover schedule with
+    the same id (including ones created with the old broken CRON parser) is
+    overwritten with a correct trigger.
+    """
+    from aisha.skills.reminder_store import get_all_pending_reminders
+
+    rows = await get_all_pending_reminders()
+    now_utc = datetime.now(timezone.utc)
+    restored = 0
+
+    for row in rows:
+        try:
+            user_tz = row.get("timezone") or USER_TIMEZONE
+            scheduled_at = datetime.fromisoformat(row["scheduled_at"])
+            is_recurring = bool(row.get("is_recurring"))
+
+            if not is_recurring and scheduled_at <= now_utc:
+                if now_utc - scheduled_at <= _LATE_NOTICE_MAX_AGE:
+                    await _send_whatsapp(
+                        row["phone"],
+                        f"⏰ Lembrete (atrasado): {row['message']}\n"
+                        f"📅 Era {_fmt_local(scheduled_at, user_tz)} — "
+                        f"eu estava fora do ar na hora do aviso.",
+                    )
+                await mark_sent(row["id"])
+                try:
+                    await scheduler.remove_schedule(row["id"])
+                except Exception:
+                    pass
+                continue
+
+            job_id = await _schedule_job(
+                reminder_id=row["id"],
+                phone=row["phone"],
+                message=row["message"],
+                scheduled_at=scheduled_at,
+                lead_minutes=REMINDER_LEAD_MINUTES,
+                is_recurring=is_recurring,
+                rrule=row.get("rrule"),
+                scheduler=scheduler,
+                user_tz=user_tz,
+            )
+            if row.get("job_id") != job_id:
+                await update_job_id(row["id"], job_id)
+            restored += 1
+        except Exception:
+            log.exception(f"Failed to restore reminder {row.get('id')}")
+
+    log.info(f"Restored {restored}/{len(rows)} reminder jobs")
+    return restored

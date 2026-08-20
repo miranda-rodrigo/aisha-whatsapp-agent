@@ -14,7 +14,6 @@ from datetime import timedelta
 from difflib import SequenceMatcher
 from typing import Literal
 
-import httpx
 from apscheduler import AsyncScheduler
 from apscheduler.triggers.cron import CronTrigger
 from openai import AsyncOpenAI
@@ -24,7 +23,6 @@ from aisha.config import (
     GRAPH_API_URL,
     OPENAI_API_KEY,
     USER_TIMEZONE,
-    WHATSAPP_TOKEN,
 )
 from aisha.messaging import split_whatsapp_text
 from aisha.models import EXTRACT_MODEL, OPENAI_SERVICE_TIER
@@ -36,6 +34,7 @@ from aisha.skills.scheduled_task_store import (
     update_job_id,
     update_task,
 )
+from aisha.whatsapp_http import get_client as get_whatsapp_client
 
 log = logging.getLogger(__name__)
 
@@ -217,20 +216,17 @@ def _resolve_task_reference(rows: list[dict], ex: TaskExtraction) -> tuple[dict 
 
 async def _send_whatsapp(phone: str, message: str) -> None:
     """Send a WhatsApp message from within the scheduler job."""
-    async with httpx.AsyncClient(
-        headers={"Authorization": f"Bearer {WHATSAPP_TOKEN}"},
-        timeout=30.0,
-    ) as client:
-        for chunk in split_whatsapp_text(message):
-            await client.post(
-                f"{GRAPH_API_URL}/messages",
-                json={
-                    "messaging_product": "whatsapp",
-                    "to": phone,
-                    "type": "text",
-                    "text": {"body": chunk},
-                },
-            )
+    client = get_whatsapp_client()
+    for chunk in split_whatsapp_text(message):
+        await client.post(
+            f"{GRAPH_API_URL}/messages",
+            json={
+                "messaging_product": "whatsapp",
+                "to": phone,
+                "type": "text",
+                "text": {"body": chunk},
+            },
+        )
 
 
 async def _execute_task(phone: str, task_id: str, name: str, prompt: str) -> None:

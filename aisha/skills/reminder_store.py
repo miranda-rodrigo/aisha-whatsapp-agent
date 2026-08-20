@@ -79,6 +79,21 @@ async def get_reminders(phone: str, status: str = "pending") -> list[dict]:
     return resp.json()
 
 
+async def get_all_pending_reminders() -> list[dict]:
+    """Return ALL pending reminders (for restoring jobs on startup)."""
+    client = get_client()
+    resp = await client.get(
+        _TABLE_URL,
+        headers=_HEADERS,
+        params={
+            "status": "eq.pending",
+            "select": "id,phone,message,scheduled_at,timezone,is_recurring,rrule,job_id",
+        },
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
 async def cancel_reminder(reminder_id: str) -> None:
     """Mark reminder as cancelled and return its job_id."""
     client = get_client()

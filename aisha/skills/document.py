@@ -126,9 +126,13 @@ def _extract_pdf_text_native(file_bytes: bytes) -> str:
         Path(tmp_path).unlink(missing_ok=True)
 
 
-async def _extract_pdf_text(file_bytes: bytes) -> str:
-    """Extract PDF text. For scanned PDFs within page limit, uses vision OCR."""
-    is_scanned, total_pages = await asyncio.to_thread(get_pdf_info, file_bytes)
+async def _extract_pdf_text(file_bytes: bytes, pdf_info: tuple[bool, int] | None = None) -> str:
+    """Extract PDF text. For scanned PDFs within page limit, uses vision OCR.
+
+    ``pdf_info`` lets callers that already ran ``get_pdf_info`` skip a second
+    full parse of the document.
+    """
+    is_scanned, total_pages = pdf_info or await asyncio.to_thread(get_pdf_info, file_bytes)
     if not is_scanned:
         log.info("PDF detected as native — using pymupdf4llm")
         return await asyncio.to_thread(_extract_pdf_text_native, file_bytes)
@@ -163,9 +167,11 @@ def _extract_docx_text(file_bytes: bytes) -> str:
     return "\n\n".join(parts)
 
 
-async def extract_text_async(file_bytes: bytes, mime_type: str) -> str:
+async def extract_text_async(
+    file_bytes: bytes, mime_type: str, pdf_info: tuple[bool, int] | None = None
+) -> str:
     if mime_type == "application/pdf":
-        return await _extract_pdf_text(file_bytes)
+        return await _extract_pdf_text(file_bytes, pdf_info)
     elif mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
         return await asyncio.to_thread(_extract_docx_text, file_bytes)
     else:
