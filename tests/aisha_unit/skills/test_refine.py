@@ -3,65 +3,38 @@
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, patch
 
-from tests.aisha_unit._helpers import namespace
-
 from aisha.skills import refine
 
 
 class RefineTests(IsolatedAsyncioTestCase):
-    def tearDown(self):
-        refine._client = None
+    async def test_sends_whole_transcript_in_one_luna_call(self):
+        mapper = AsyncMock(return_value=["texto refinado"])
 
-    async def test_generate_sends_stable_prompt_and_strips_response(self):
-        generate = AsyncMock(return_value=namespace(text="  texto refinado \n"))
-        client = namespace(aio=namespace(models=namespace(generate_content=generate)))
-
-        with patch.object(refine, "_get_client", return_value=client):
-            result = await refine._generate("modelo", "fala bruta")
+        with patch.object(refine, "map_chat_chunks_async", mapper):
+            result = await refine.refine_transcription("fala bruta")
 
         self.assertEqual(result, "texto refinado")
-        kwargs = generate.await_args.kwargs
-        self.assertEqual(kwargs["model"], "modelo")
-        self.assertEqual(kwargs["contents"], "fala bruta")
-        self.assertEqual(kwargs["config"].system_instruction, refine._SYSTEM_PROMPT)
-        self.assertEqual(kwargs["config"].temperature, 0.3)
+        system, chunks, user_fn = mapper.await_args.args
+        self.assertEqual(system, refine._SYSTEM_PROMPT)
+        self.assertEqual(chunks, ["fala bruta"])
+        self.assertEqual(user_fn(0, "fala bruta", 1), "fala bruta")
+        self.assertEqual(refine.refine_model_id(), "gpt-5.6-luna")
 
-    async def test_retries_with_fallback_only_for_503(self):
-        class FakeServerError(Exception):
-            def __init__(self, code):
-                self.code = code
-
-        generate = AsyncMock(
-            side_effect=[FakeServerError(503), "texto recuperado"]
-        )
+    async def test_parallel_chunks_keep_original_order(self):
+        mapper = AsyncMock(return_value=["um", "dois"])
 
         with (
-            patch.object(refine, "ServerError", FakeServerError),
-            patch.object(refine, "_generate", generate),
+            patch.object(refine, "chunk_text", return_value=["a" * 10, "b" * 10]),
+            patch.object(refine, "map_chat_chunks_async", mapper),
         ):
-            result = await refine.refine_transcription("fala")
+            result = await refine.refine_transcription("ignored")
 
-        self.assertEqual(result, "texto recuperado")
-        self.assertEqual(
-            [call.args for call in generate.await_args_list],
-            [
-                (refine._PRIMARY_MODEL, "fala"),
-                (refine._FALLBACK_MODEL, "fala"),
-            ],
-        )
+        self.assertEqual(result, "um\n\ndois")
+        user_fn = mapper.await_args.args[2]
+        self.assertIn("Parte 1 de 2", user_fn(0, "aaa", 2))
+        self.assertIn("Parte 2 de 2", user_fn(1, "bbb", 2))
 
-    async def test_propagates_non_503_error_without_fallback(self):
-        class FakeServerError(Exception):
-            def __init__(self, code):
-                self.code = code
-
-        generate = AsyncMock(side_effect=FakeServerError(500))
-
-        with (
-            patch.object(refine, "ServerError", FakeServerError),
-            patch.object(refine, "_generate", generate),
-        ):
-            with self.assertRaises(FakeServerError):
-                await refine.refine_transcription("fala")
-
-        generate.assert_awaited_once_with(refine._PRIMARY_MODEL, "fala")
+    async def test_empty_raw_fails_explicitly(self):
+        with self.assertRaises(RuntimeError) as ctx:
+            await refine.refine_transcription("   ")
+        self.assertIn("vazio", str(ctx.exception))

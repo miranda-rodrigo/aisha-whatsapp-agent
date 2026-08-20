@@ -488,12 +488,12 @@ A Aisha escolhe automaticamente o melhor modelo para cada tarefa — você não 
 | Pesquisa, raciocínio, tarefas complexas | `gpt-5.6-sol` em Fast mode |
 | Geração e edição de imagem | `gpt-5.6-sol` em Fast mode + `image_generation` |
 | Transcrição de áudio | `whisper-1` |
-| Refinamento de transcrição | `gemini-3.6-flash` (fallback: `gemini-2.5-flash`) |
+| Refinamento de transcrição | `gpt-5.6-luna` com `reasoning.effort=none` |
 | Extração estruturada e intenção de lembrete / tarefa | `gpt-5.6-sol` em Fast mode |
 | Execução de tarefa agendada (web e/ou X) | `gpt-5.6-sol` em Fast mode + `search_x` quando o assunto é o X |
 | O que estão falando no X | Grok (`x_search`) via tool `search_x` |
 | Resumo de documentos PDF/DOCX e OCR | `gpt-5.6-sol` em Fast mode |
-| Análise de vídeo YouTube | `gemini-3.6-flash` (fallback: `gemini-2.5-flash`); vídeo longo: legendas ou Whisper + TXT |
+| Análise de vídeo YouTube | `gemini-3.6-flash` (fallback: `gemini-2.5-flash`) para vídeo curto via URI; vídeo longo: legendas ou Whisper + resumo `gpt-5.6-luna` + TXT |
 | Leitura de páginas web | Jina Reader + `gpt-5.6-sol` em Fast mode |
 | Mapa com raio | Nominatim + Google Maps Static API, tool `draw_radius_map` |
 | Memória de longo prazo | `text-embedding-3-small` + tools `save_memory` / `forget_memory` |

@@ -97,6 +97,8 @@ class AgentLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["model"], agent.FAST_MODEL)
         self.assertEqual(kwargs["model"], "gpt-5.6-luna")
         self.assertEqual(kwargs["service_tier"], "fast")
+        self.assertEqual(kwargs["reasoning"], {"effort": "none"})
+        self.assertNotIn("temperature", kwargs)
         self.assertEqual(kwargs["input"], "oi")
         self.assertEqual(kwargs["previous_response_id"], "previous-1")
         self.assertIn("Europe/Lisbon", kwargs["instructions"])

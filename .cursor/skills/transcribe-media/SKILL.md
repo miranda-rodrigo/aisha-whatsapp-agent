@@ -17,9 +17,12 @@ Use this skill for transcription, captions, Whisper, "texto bruto", "melhora ess
 2. Scripts live next to this file:
    - `scripts/transcribe.py` — always produces `raw.txt` (+ `meta.json`, and `raw.srt` when timestamps exist)
    - `scripts/cleanup.py` — deterministic cleanup, never touches `raw.txt`
+   - `scripts/improve.py` — melhoria com IA (`gpt-5.6-luna`, `reasoning.effort=none`)
+   - `scripts/chat.py` — contrato do chat model (não chamar direto)
    - `references/refine-prompt.md` — editorial prompt for AI improve
-3. Need `ffmpeg`/`ffprobe`, `yt-dlp` (URLs), `openai` + `OPENAI_API_KEY` (Whisper). If a script says a dependency is missing, **ask the user before installing**. Do not pip install, brew install, or download models on your own.
+3. Need `ffmpeg`/`ffprobe`, `yt-dlp` (URLs), `openai` + `OPENAI_API_KEY` (Whisper e melhoria). If a script says a dependency is missing, **ask the user before installing**. Do not pip install, brew install, or download models on your own.
 4. Do not train or download a local Whisper model.
+5. Chat model: `gpt-5.6-luna` with `reasoning.effort=none`. Whisper: `whisper-1`. One key: `OPENAI_API_KEY`. Without it, fail explicitly — do not invent text.
 
 ## Workflow
 
@@ -57,12 +60,13 @@ This must not modify `raw.txt`. The script is conservative: filler pauses (`uh`,
 
 ### 4. Optional improve with AI
 
-Only if they asked to melhorar / improve **com IA**. You are the editor — do not call Gemini or an extra API.
+Only if they asked to melhorar / improve **com IA**. Do not edit the transcript yourself and do not call Gemini.
 
-1. Read `raw.txt` (the original, not cleaned).
-2. Read `references/refine-prompt.md` and follow it.
-3. Write the result to `transcripts/<slug>/improved.txt`.
-4. Do not replace `raw.txt`. Do not summarize. Keep the original language and approximate length.
+```bash
+python scripts/improve.py transcripts/<slug>/raw.txt --out transcripts/<slug>/improved.txt
+```
+
+This uses `gpt-5.6-luna` with `reasoning.effort=none` (Responses API; large ~200k-char chunks; parallel if more than one). It must not modify `raw.txt`. Do not summarize. Keep the original language and approximate length. If `OPENAI_API_KEY` is missing, stop and ask — do not invent the improved text.
 
 ### 5. Reply
 
@@ -78,7 +82,7 @@ If the user did not say whether they want raw, cleaned, or AI-improved, deliver 
 |---|---|
 | just "transcreve" / "transcribe" | raw only, then ask if they want cleaned or improved |
 | "sem IA" / "limpo" / "clean without AI" | raw + `cleanup.py` |
-| "com IA" / "melhora" / "improve" | raw + you write `improved.txt` from the refine prompt |
+| "com IA" / "melhora" / "improve" | raw + `improve.py` (`gpt-5.6-luna`, `reasoning.effort=none`) |
 | both / "as duas" | raw + cleaned and/or improved, never delete raw |
 
 Show raw first. Improved is optional extra, not a replacement.

@@ -1,18 +1,7 @@
-"""Refine raw transcriptions using an LLM."""
+"""Refine raw transcriptions using gpt-5.6-luna (reasoning none)."""
 
-import logging
-
-from google import genai
-from google.genai import types
-from google.genai.errors import ServerError
-
-from aisha.config import GEMINI_API_KEY
-from aisha.models import GEMINI_FALLBACK, GEMINI_PRIMARY
-
-log = logging.getLogger(__name__)
-
-_PRIMARY_MODEL = GEMINI_PRIMARY
-_FALLBACK_MODEL = GEMINI_FALLBACK
+from aisha.openai_chat import chunk_text, map_chat_chunks_async
+from aisha.models import CHAT_MODEL
 
 _SYSTEM_PROMPT = """\
 Atue como um editor de textos especializado em transcrições. \
@@ -34,33 +23,27 @@ Foco: O resultado deve parecer um texto escrito intencionalmente, sem perder a v
 
 Retorne APENAS o texto refinado, sem explicações ou comentários."""
 
-_client: genai.Client | None = None
 
-
-def _get_client() -> genai.Client:
-    global _client
-    if _client is None:
-        _client = genai.Client(api_key=GEMINI_API_KEY)
-    return _client
-
-
-async def _generate(model: str, raw_text: str) -> str:
-    response = await _get_client().aio.models.generate_content(
-        model=model,
-        contents=raw_text,
-        config=types.GenerateContentConfig(
-            system_instruction=_SYSTEM_PROMPT,
-            temperature=0.3,
-        ),
+def _user_for_chunk(index: int, chunk: str, total: int) -> str:
+    if total == 1:
+        return chunk
+    return (
+        f"Parte {index + 1} de {total} da transcrição bruta. "
+        f"Edite só este trecho, sem resumir.\n\n{chunk}"
     )
-    return response.text.strip()
 
 
 async def refine_transcription(raw_text: str) -> str:
-    try:
-        return await _generate(_PRIMARY_MODEL, raw_text)
-    except ServerError as e:
-        if e.code == 503:
-            log.warning(f"Primary model {_PRIMARY_MODEL} unavailable (503), trying fallback {_FALLBACK_MODEL}")
-            return await _generate(_FALLBACK_MODEL, raw_text)
-        raise
+    raw = (raw_text or "").strip()
+    if not raw:
+        raise RuntimeError("Texto bruto vazio; não há o que melhorar.")
+    chunks = chunk_text(raw)
+    pieces = await map_chat_chunks_async(_SYSTEM_PROMPT, chunks, _user_for_chunk)
+    improved = "\n\n".join(pieces).strip()
+    if not improved:
+        raise RuntimeError("O modelo devolveu resposta vazia.")
+    return improved
+
+
+def refine_model_id() -> str:
+    return CHAT_MODEL

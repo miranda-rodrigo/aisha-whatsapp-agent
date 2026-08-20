@@ -251,7 +251,7 @@ whatsapp-agent/
 | LLM agente | OpenAI gpt-5.6-sol via Responses API, Fast mode |
 | LLM fast-path | OpenAI gpt-5.6-luna, Fast mode |
 | LLM extração / documentos / OCR | OpenAI gpt-5.6-sol, Fast mode |
-| LLM refinamento | Google Gemini 3.6 Flash (fallback: 2.5 Flash) |
+| LLM refinamento / resumo de transcrição | OpenAI gpt-5.6-luna, `reasoning.effort=none` |
 | Transcrição | OpenAI Whisper (whisper-1) |
 | Geração/edição de imagem | image_generation (Responses API) |
 | Mapa com raio | Nominatim + Google Maps Static API (`draw_radius_map`) |
@@ -503,7 +503,8 @@ No painel de developers.facebook.com:
 | OpenAI Whisper (transcrição de áudio) | ~$0.006/min |
 | OpenAI gpt-5.6-luna (fast-path, Fast mode) | Premium sobre o preço padrão por token |
 | OpenAI gpt-5.6-sol (agente + extração + docs + OCR, Fast mode) | Premium sobre o preço padrão por token |
-| Google Gemini 3.6 Flash (refinamento / YouTube) | ~$0.001/msg |
+| Google Gemini 3.6 Flash (YouTube curto via URI) | ~$0.001/msg |
+| OpenAI gpt-5.6-luna (refinamento / resumo de transcrição, reasoning none) | barato por token; 1 request típico |
 | OpenAI gpt-image-1.5 (imagem) | ~$0.02-0.08/imagem |
 | OpenAI web_search (busca) | ~$0.001/chamada |
 | xAI x_search (posts do X) | ~$0.005/chamada + tokens Grok |
@@ -517,8 +518,8 @@ No painel de developers.facebook.com:
 
 - **Deduplicação:** A Meta pode enviar o mesmo webhook duas vezes. O app mantém um cache de até 1000 IDs de mensagens processadas para evitar respostas duplicadas.
 - **Allowlist:** Apenas números em `ALLOWED_NUMBERS` recebem respostas. Números brasileiros chegam sem o 9 extra (ex: `5585941322222` → `558594132222`).
-- **ffmpeg:** Necessário para converter áudio OGG/Opus do WhatsApp para MP3 antes de enviar ao Whisper. Está incluído no Dockerfile.
-- **Chunking de áudio:** Áudios maiores que 24 MB são divididos em chunks de 10 minutos e transcritos em paralelo (até 4 workers).
+- **ffmpeg:** Só recodifica quando o arquivo não cabe no Whisper (~24 MB) ou o container não é aceito. Áudio pequeno já compatível (ogg/mp3/m4a/wav/webm/mp4) vai direto. ffmpeg está no Dockerfile.
+- **Chunking de áudio:** Áudios maiores que 24 MB são divididos em chunks de 10 minutos e transcritos em paralelo (até 6 workers).
 - **`.dockerignore`:** Impede que o `.env` local (com placeholders) sobreescreva as variáveis de produção dentro do container.
 - **Porta dinâmica:** O Dockerfile usa `${PORT:-8000}` para compatibilidade com Railway, que injeta a porta via variável de ambiente.
 - **Números brasileiros:** A Meta normaliza números BR removendo um dígito 9. Configure `ALLOWED_NUMBERS` com o formato que a Meta envia.

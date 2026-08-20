@@ -23,7 +23,20 @@ from urllib.parse import parse_qs, urlparse
 MAX_FILE_SIZE = 24 * 1024 * 1024
 CHUNK_DURATION_SECONDS = 600
 WHISPER_MODEL = "whisper-1"
+WHISPER_WORKERS = 6
 SUB_LANG_PRIORITY = ("pt-BR", "pt", "pt-PT", "en", "en-US", "en-GB", "en-orig")
+WHISPER_INPUT_EXTS = {
+    ".flac",
+    ".m4a",
+    ".mp3",
+    ".mp4",
+    ".mpeg",
+    ".mpga",
+    ".oga",
+    ".ogg",
+    ".wav",
+    ".webm",
+}
 
 TEXT_EXTS = {".txt", ".srt", ".vtt"}
 
@@ -118,7 +131,8 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, check=True, capture_output=True, text=True)
 
 
-def _get_audio_duration(audio_path: Path) -> float | None:
+def _probe_media(audio_path: Path) -> dict:
+    """One ffprobe call: duration plus stream codecs."""
     _require_bin("ffprobe")
     result = _run(
         [
@@ -126,16 +140,41 @@ def _get_audio_duration(audio_path: Path) -> float | None:
             "-v",
             "error",
             "-show_entries",
-            "format=duration",
+            "format=duration:stream=codec_type,codec_name",
             "-of",
-            "default=noprint_wrappers=1:nokey=1",
+            "json",
             str(audio_path),
         ]
     )
-    raw = result.stdout.strip()
-    if not raw or raw.lower() == "n/a":
-        return None
-    return float(raw)
+    data = json.loads(result.stdout or "{}")
+    duration_raw = (data.get("format") or {}).get("duration")
+    try:
+        duration = float(duration_raw) if duration_raw not in (None, "N/A", "") else None
+    except (TypeError, ValueError):
+        duration = None
+    streams = data.get("streams") or []
+    audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
+    video = next((s for s in streams if s.get("codec_type") == "video"), None)
+    return {
+        "duration": duration,
+        "audio_codec": (audio or {}).get("codec_name"),
+        "video_codec": (video or {}).get("codec_name"),
+        "has_audio": audio is not None,
+        "has_video": video is not None,
+    }
+
+
+def _get_audio_duration(audio_path: Path) -> float | None:
+    return _probe_media(audio_path).get("duration")
+
+
+def _should_send_raw(path: Path) -> bool:
+    if path.suffix.lower() not in WHISPER_INPUT_EXTS:
+        return False
+    try:
+        return path.stat().st_size <= MAX_FILE_SIZE
+    except OSError:
+        return False
 
 
 def _convert_to_mp3(input_path: Path, output_path: Path) -> None:
@@ -200,6 +239,20 @@ def _transcribe_file(client, audio_path: Path, response_format: str = "text") ->
     return _whisper_result_text(result)
 
 
+def _transcribe_chunks(client, chunks: list[Path]) -> str:
+    results: dict[int, str] = {}
+
+    def _do_chunk(idx: int, chunk_path: Path) -> tuple[int, str]:
+        return idx, _transcribe_file(client, chunk_path, "text")
+
+    with ThreadPoolExecutor(max_workers=min(len(chunks), WHISPER_WORKERS)) as executor:
+        futures = [executor.submit(_do_chunk, i, c) for i, c in enumerate(chunks)]
+        for future in futures:
+            idx, text = future.result()
+            results[idx] = text
+    return "\n".join(results[i] for i in range(len(chunks)))
+
+
 def _whisper_path(audio_path: Path) -> tuple[str, str | None, float | None]:
     """Return (plain_text, srt_or_none, duration)."""
     client = _require_openai()
@@ -208,6 +261,11 @@ def _whisper_path(audio_path: Path) -> tuple[str, str | None, float | None]:
         duration = _get_audio_duration(audio_path)
     except MissingDependency:
         duration = None
+
+    if _should_send_raw(audio_path):
+        srt = _transcribe_file(client, audio_path, "srt")
+        text = parse_caption_text(srt) if _looks_like_captions(srt) else srt.strip()
+        return text, srt if _looks_like_captions(srt) else None, duration
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         mp3_path = Path(tmp_dir) / "audio.mp3"
@@ -219,19 +277,7 @@ def _whisper_path(audio_path: Path) -> tuple[str, str | None, float | None]:
             return text, srt if _looks_like_captions(srt) else None, duration
 
         chunks = _split_audio(mp3_path, CHUNK_DURATION_SECONDS, tmp_dir)
-        results: dict[int, str] = {}
-
-        def _do_chunk(idx: int, chunk_path: Path) -> tuple[int, str]:
-            return idx, _transcribe_file(client, chunk_path, "text")
-
-        with ThreadPoolExecutor(max_workers=min(len(chunks), 4)) as executor:
-            futures = [executor.submit(_do_chunk, i, c) for i, c in enumerate(chunks)]
-            for future in futures:
-                idx, text = future.result()
-                results[idx] = text
-
-        joined = "\n".join(results[i] for i in range(len(chunks)))
-        return joined, None, duration
+        return _transcribe_chunks(client, chunks), None, duration
 
 
 def _looks_like_captions(text: str) -> bool:
