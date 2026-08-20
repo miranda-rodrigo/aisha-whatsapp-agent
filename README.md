@@ -118,10 +118,11 @@ Aisha é uma assistente pessoal orientada a tarefas que roda no WhatsApp Busines
 - Exemplos de uso: resumo, tradução, extração de dados, explicação simplificada, post para LinkedIn
 
 ### Mapa com raio (círculo em torno de um ponto)
-- Informe um endereço e um raio; a Aisha envia um mapa real (OpenStreetMap) com o círculo desenhado
+- Informe um endereço e um raio; a Aisha envia um mapa Google (visual CalcMaps) com círculo azul e pino vermelho
 - Unidades: metros, km (padrão se você só mandar o número) ou milhas; faixa de 50 m a 50 km
 - Se o endereço for ambíguo, ela lista as opções. Follow-up ("agora com 5 km") reusa o último ponto
-- Não usa geração de imagem por IA — geocodifica no Nominatim e desenha o raio sobre tiles OSM
+- Não usa geração de imagem por IA — geocodifica no Nominatim e pede o PNG à Google Maps Static API
+- Requer `GOOGLE_MAPS_API_KEY`
 - Exemplos: "mapa de 2 km em torno da Av. Beira Mar 123, Fortaleza"
 
 ### Lembretes
@@ -252,7 +253,7 @@ whatsapp-agent/
 | LLM refinamento | Google Gemini 3.6 Flash (fallback: 2.5 Flash) |
 | Transcrição | OpenAI Whisper (whisper-1) |
 | Geração/edição de imagem | image_generation (Responses API) |
-| Mapa com raio | Nominatim + tiles OSM + PyMuPDF (`draw_radius_map`) |
+| Mapa com raio | Nominatim + Google Maps Static API (`draw_radius_map`) |
 | Busca na web | Ferramenta nativa da Responses API |
 | Busca no X (Twitter) | xAI Grok `x_search` via tool `search_x` |
 | Memória de longo prazo | Embeddings text-embedding-3-small + tabela memories |
@@ -380,6 +381,7 @@ USER_TIMEZONE=America/Sao_Paulo
 REMINDER_LEAD_MINUTES=15
 GEMINI_API_KEY=AIzaSy...
 XAI_API_KEY=xai-...
+GOOGLE_MAPS_API_KEY=AIzaSy...
 WHATSAPP_APP_SECRET=app_secret_da_meta
 ```
 
@@ -397,6 +399,7 @@ WHATSAPP_APP_SECRET=app_secret_da_meta
 | `REMINDER_LEAD_MINUTES` | Minutos de antecedência para o aviso do lembrete (padrão: `15`) |
 | `GEMINI_API_KEY` | API key do Google AI Studio para análise de vídeos YouTube (opcional) |
 | `XAI_API_KEY` | API key da xAI (console.x.ai) para buscar o que pessoas estão falando no X (opcional) |
+| `GOOGLE_MAPS_API_KEY` | Chave da Google Maps Static API para mapa com raio (opcional; sem ela a skill recusa) |
 | `WHATSAPP_APP_SECRET` | App Secret da Meta para validar `X-Hub-Signature-256`. Se vazio, a verificação é pulada. |
 | `PORT` | Porta do servidor (Railway injeta automaticamente; padrão: 8000) |
 

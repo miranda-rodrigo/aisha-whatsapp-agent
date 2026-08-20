@@ -352,15 +352,15 @@ TOOL_DEFINITIONS: list[dict] = [
         "type": "function",
         "name": "draw_radius_map",
         "description": (
-            "Build a REAL geographic map (OpenStreetMap tiles) with a geodesic circle "
-            "around an address or coordinates. Use this whenever the user wants a map "
-            "with a radius, a circle around a point, coverage area, or 'mapa com raio'. "
+            "Build a REAL geographic map (Google Maps Static API, CalcMaps-style) with a "
+            "geodesic circle around an address or coordinates. Use this whenever the user "
+            "wants a map with a radius, a circle around a point, coverage area, or 'mapa com raio'. "
             "NEVER use image_generation for maps — generated images are not geographically accurate. "
             "Do not call this if the address/point OR the radius is missing; ask one question first. "
             "If the tool returns status=ambiguous, list the candidates and ask which one to use. "
             "On status=ok the PNG is sent automatically to WhatsApp; reply with display_name, "
-            "lat/lng, radius_label and maps_url. If unit_assumed=km, mention that the radius was "
-            "interpreted in kilometers."
+            "lat/lng, radius_label, area_label and maps_url. If unit_assumed=km, mention that "
+            "the radius was interpreted in kilometers."
         ),
         "parameters": {
             "type": "object",

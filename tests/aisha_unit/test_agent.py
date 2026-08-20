@@ -68,6 +68,7 @@ class SystemPromptTests(unittest.TestCase):
         prompt = agent._build_system_prompt(None, "America/Sao_Paulo")
         self.assertIn("draw_radius_map", prompt)
         self.assertIn("NUNCA use image_generation para mapas", prompt)
+        self.assertIn("area_label", prompt)
 
 
 class AgentLoopTests(unittest.IsolatedAsyncioTestCase):

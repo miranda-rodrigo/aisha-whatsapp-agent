@@ -1,15 +1,15 @@
 """Mapa estático com círculo geodésico em torno de um endereço ou ponto.
 
-Geocodifica via Nominatim (OSM), baixa tiles Web Mercator e desenha o raio
-com PyMuPDF. O PNG fica num store em memória por telefone — não vai no
-contexto do modelo.
+Geocodifica via Nominatim e pede a imagem à Google Maps Static API
+(visual CalcMaps: roadmap, círculo azul, pino vermelho). O PNG fica num
+store em memória por telefone — não vai no contexto do modelo.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import math
+import os
 import re
 import unicodedata
 from typing import Any
@@ -20,21 +20,19 @@ log = logging.getLogger(__name__)
 
 USER_AGENT = "Aisha/1.0 (contato@askaisha.com.br)"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+STATICMAP_URL = "https://maps.googleapis.com/maps/api/staticmap"
 
 MIN_RADIUS_M = 50
 MAX_RADIUS_M = 50_000
-IMAGE_SIZE = 800
-TILE_SIZE = 256
 CIRCLE_POINTS = 64
-CIRCLE_FIT = 0.70
 CLUSTER_M = 200
 MAX_CANDIDATES = 5
-MIN_ZOOM = 3
-MAX_ZOOM = 18
 EARTH_RADIUS_M = 6_371_000.0
-EARTH_CIRCUMFERENCE_M = 40_075_016.686
-MERCATOR_MAX_LAT = 85.05112878
+
+# CalcMaps-like overlay: blue fill ~33% opacity, darker blue stroke.
+PATH_FILL = "0x1E88E655"
+PATH_STROKE = "0x1565C0FF"
+PATH_WEIGHT = "2"
 
 _UNIT_TO_METERS = {
     "m": 1.0,
@@ -59,12 +57,20 @@ _UNIT_TO_METERS = {
 _last_maps: dict[str, bytes] = {}
 
 
+class MissingMapsApiKey(RuntimeError):
+    """GOOGLE_MAPS_API_KEY ausente — sem fallback OSM."""
+
+
 def store_map_image(phone: str, png: bytes) -> None:
     _last_maps[phone] = png
 
 
 def pop_map_image(phone: str) -> bytes | None:
     return _last_maps.pop(phone, None)
+
+
+def maps_api_key() -> str:
+    return os.environ.get("GOOGLE_MAPS_API_KEY", "").strip()
 
 
 def _strip_accents(text: str) -> str:
@@ -122,6 +128,14 @@ def format_radius(radius_m: float) -> str:
     return f"{radius_m:.0f} m"
 
 
+def format_area(radius_m: float) -> str:
+    area_m2 = math.pi * radius_m * radius_m
+    if area_m2 >= 1_000_000:
+        km2 = area_m2 / 1_000_000
+        return f"{km2:.2f} km²".replace(".", ",")
+    return f"{int(round(area_m2))} m²"
+
+
 def haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     p1, p2 = math.radians(lat1), math.radians(lat2)
     dphi = math.radians(lat2 - lat1)
@@ -149,20 +163,69 @@ def geodesic_circle(lat: float, lng: float, radius_m: float, n: int = CIRCLE_POI
     return [destination_point(lat, lng, radius_m, 2 * math.pi * i / n) for i in range(n)]
 
 
-def latlng_to_world_pixels(lat: float, lng: float, zoom: int) -> tuple[float, float]:
-    n = TILE_SIZE * (2 ** zoom)
-    x = (lng + 180.0) / 360.0 * n
-    lat_c = max(min(lat, MERCATOR_MAX_LAT), -MERCATOR_MAX_LAT)
-    sin_lat = math.sin(math.radians(lat_c))
-    y = (0.5 - math.log((1 + sin_lat) / (1 - sin_lat)) / (4 * math.pi)) * n
-    return x, y
+def encode_polyline(points: list[tuple[float, float]]) -> str:
+    """Encoded polyline algorithm da Google Maps Static API."""
+
+    def encode_signed(value: int) -> str:
+        value = ~(value << 1) if value < 0 else (value << 1)
+        chunks: list[str] = []
+        while value >= 0x20:
+            chunks.append(chr((0x20 | (value & 0x1F)) + 63))
+            value >>= 5
+        chunks.append(chr(value + 63))
+        return "".join(chunks)
+
+    parts: list[str] = []
+    prev_lat = 0
+    prev_lng = 0
+    for lat, lng in points:
+        lat_e5 = int(round(lat * 1e5))
+        lng_e5 = int(round(lng * 1e5))
+        parts.append(encode_signed(lat_e5 - prev_lat))
+        parts.append(encode_signed(lng_e5 - prev_lng))
+        prev_lat, prev_lng = lat_e5, lng_e5
+    return "".join(parts)
 
 
-def choose_zoom(lat: float, radius_m: float) -> int:
-    target_mpp = (2 * radius_m) / (CIRCLE_FIT * IMAGE_SIZE)
-    cos_lat = max(math.cos(math.radians(lat)), 0.01)
-    zoom_f = math.log2(cos_lat * EARTH_CIRCUMFERENCE_M / (TILE_SIZE * target_mpp))
-    return max(MIN_ZOOM, min(MAX_ZOOM, int(round(zoom_f))))
+def decode_polyline(encoded: str) -> list[tuple[float, float]]:
+    """Decodifica para testes: o círculo precisa fechar e ter o raio certo."""
+    points: list[tuple[float, float]] = []
+    index = 0
+    lat = 0
+    lng = 0
+    length = len(encoded)
+    while index < length:
+        result = 0
+        shift = 0
+        while True:
+            byte = ord(encoded[index]) - 63
+            index += 1
+            result |= (byte & 0x1F) << shift
+            shift += 5
+            if byte < 0x20:
+                break
+        lat += ~(result >> 1) if result & 1 else (result >> 1)
+        result = 0
+        shift = 0
+        while True:
+            byte = ord(encoded[index]) - 63
+            index += 1
+            result |= (byte & 0x1F) << shift
+            shift += 5
+            if byte < 0x20:
+                break
+        lng += ~(result >> 1) if result & 1 else (result >> 1)
+        points.append((lat / 1e5, lng / 1e5))
+    return points
+
+
+def closed_circle_path(lat: float, lng: float, radius_m: float) -> str:
+    pts = geodesic_circle(lat, lng, radius_m)
+    pts.append(pts[0])
+    return (
+        f"fillcolor:{PATH_FILL}|color:{PATH_STROKE}|weight:{PATH_WEIGHT}"
+        f"|enc:{encode_polyline(pts)}"
+    )
 
 
 def _as_float(value: Any) -> float | None:
@@ -210,115 +273,17 @@ async def geocode_address(address: str, client: httpx.AsyncClient) -> dict:
     return chosen
 
 
-async def _fetch_tile(client: httpx.AsyncClient, z: int, x: int, y: int) -> tuple[tuple[int, int], bytes]:
-    resp = await client.get(TILE_URL.format(z=z, x=x, y=y))
-    resp.raise_for_status()
-    return (x, y), resp.content
-
-
-def _render_map_png(
-    tiles: dict[tuple[int, int], bytes],
-    zoom: int,
-    x_min: int,
-    y_min: int,
-    x_max: int,
-    y_max: int,
-    lat: float,
-    lng: float,
-    radius_m: float,
-) -> bytes:
-    import pymupdf
-
-    mosaic_w = (x_max - x_min + 1) * TILE_SIZE
-    mosaic_h = (y_max - y_min + 1) * TILE_SIZE
-    origin_x = x_min * TILE_SIZE
-    origin_y = y_min * TILE_SIZE
-
-    doc = pymupdf.open()
-    page = doc.new_page(width=mosaic_w, height=mosaic_h)
-    for tx in range(x_min, x_max + 1):
-        for ty in range(y_min, y_max + 1):
-            png = tiles.get((tx, ty))
-            if not png:
-                continue
-            px = (tx - x_min) * TILE_SIZE
-            py = (ty - y_min) * TILE_SIZE
-            page.insert_image(pymupdf.Rect(px, py, px + TILE_SIZE, py + TILE_SIZE), stream=png)
-
-    points = []
-    for clat, clng in geodesic_circle(lat, lng, radius_m):
-        wx, wy = latlng_to_world_pixels(clat, clng, zoom)
-        points.append(pymupdf.Point(wx - origin_x, wy - origin_y))
-    if points:
-        points.append(points[0])
-        shape = page.new_shape()
-        shape.draw_polyline(points)
-        shape.finish(
-            color=(0.13, 0.40, 0.85),
-            fill=(0.13, 0.40, 0.85),
-            width=3,
-            closePath=True,
-            fill_opacity=0.18,
-        )
-        shape.commit()
-
-    cx, cy = latlng_to_world_pixels(lat, lng, zoom)
-    rel_cx, rel_cy = cx - origin_x, cy - origin_y
-    page.draw_circle(
-        pymupdf.Point(rel_cx, rel_cy),
-        7,
-        color=(0.85, 0.15, 0.15),
-        fill=(0.85, 0.15, 0.15),
-        width=1,
-    )
-    page.draw_circle(
-        pymupdf.Point(rel_cx, rel_cy),
-        11,
-        color=(0.85, 0.15, 0.15),
-        fill=None,
-        width=2,
-    )
-
-    label = format_radius(radius_m)
-    north_lat, north_lng = destination_point(lat, lng, radius_m, 0.0)
-    nx, ny = latlng_to_world_pixels(north_lat, north_lng, zoom)
-    label_point = pymupdf.Point(nx - origin_x - 18, ny - origin_y - 6)
-    page.insert_text(label_point, label, fontsize=13, color=(0.10, 0.20, 0.45))
-
-    clip_x0 = rel_cx - IMAGE_SIZE / 2
-    clip_y0 = rel_cy - IMAGE_SIZE / 2
-    clip_x0 = min(max(clip_x0, 0), max(0, mosaic_w - IMAGE_SIZE))
-    clip_y0 = min(max(clip_y0, 0), max(0, mosaic_h - IMAGE_SIZE))
-    clip_w = min(IMAGE_SIZE, mosaic_w)
-    clip_h = min(IMAGE_SIZE, mosaic_h)
-    clip = pymupdf.Rect(clip_x0, clip_y0, clip_x0 + clip_w, clip_y0 + clip_h)
-    pix = page.get_pixmap(clip=clip, alpha=False)
-    png = pix.tobytes("png")
-    doc.close()
-    return png
-
-
-def _tile_window(lat: float, lng: float, radius_m: float, zoom: int) -> tuple[int, int, int, int]:
-    pad_m = radius_m / CIRCLE_FIT
-    north, _ = destination_point(lat, lng, pad_m, 0.0)
-    south, _ = destination_point(lat, lng, pad_m, math.pi)
-    _, east = destination_point(lat, lng, pad_m, math.pi / 2)
-    _, west = destination_point(lat, lng, pad_m, 3 * math.pi / 2)
-    n_tiles = 2 ** zoom
-    corners = [
-        latlng_to_world_pixels(north, west, zoom),
-        latlng_to_world_pixels(north, east, zoom),
-        latlng_to_world_pixels(south, west, zoom),
-        latlng_to_world_pixels(south, east, zoom),
-        latlng_to_world_pixels(lat, lng, zoom),
-    ]
-    xs = [p[0] for p in corners]
-    ys = [p[1] for p in corners]
-    x_min = max(0, int(math.floor(min(xs) / TILE_SIZE)))
-    y_min = max(0, int(math.floor(min(ys) / TILE_SIZE)))
-    x_max = min(n_tiles - 1, int(math.floor(max(xs) / TILE_SIZE)))
-    y_max = min(n_tiles - 1, int(math.floor(max(ys) / TILE_SIZE)))
-    return x_min, y_min, x_max, y_max
+def static_map_params(lat: float, lng: float, radius_m: float, api_key: str) -> dict[str, str]:
+    return {
+        "size": "640x640",
+        "scale": "2",
+        "maptype": "roadmap",
+        "language": "pt-BR",
+        "region": "BR",
+        "markers": f"color:red|{lat:.6f},{lng:.6f}",
+        "path": closed_circle_path(lat, lng, radius_m),
+        "key": api_key,
+    }
 
 
 async def render_radius_map(
@@ -327,30 +292,21 @@ async def render_radius_map(
     lng: float,
     radius_m: float,
 ) -> bytes:
-    zoom = choose_zoom(lat, radius_m)
-    x_min, y_min, x_max, y_max = _tile_window(lat, lng, radius_m, zoom)
-    coords = [(x, y) for x in range(x_min, x_max + 1) for y in range(y_min, y_max + 1)]
-    while len(coords) > 25 and zoom > MIN_ZOOM:
-        zoom -= 1
-        x_min, y_min, x_max, y_max = _tile_window(lat, lng, radius_m, zoom)
-        coords = [(x, y) for x in range(x_min, x_max + 1) for y in range(y_min, y_max + 1)]
-    tiles = await _fetch_tiles(client, zoom, coords[:25])
-    return _render_map_png(tiles, zoom, x_min, y_min, x_max, y_max, lat, lng, radius_m)
-
-
-async def _fetch_tiles(
-    client: httpx.AsyncClient,
-    zoom: int,
-    coords: list[tuple[int, int]],
-) -> dict[tuple[int, int], bytes]:
-    sem = asyncio.Semaphore(8)
-
-    async def one(x: int, y: int):
-        async with sem:
-            return await _fetch_tile(client, zoom, x, y)
-
-    pairs = await asyncio.gather(*[one(x, y) for x, y in coords])
-    return dict(pairs)
+    key = maps_api_key()
+    if not key:
+        raise MissingMapsApiKey(
+            "Mapa com raio precisa da chave GOOGLE_MAPS_API_KEY "
+            "(Google Maps Static API). Sem ela não consigo gerar o mapa."
+        )
+    resp = await client.get(STATICMAP_URL, params=static_map_params(lat, lng, radius_m, key))
+    resp.raise_for_status()
+    content = resp.content or b""
+    stripped = content.lstrip()
+    if stripped.startswith(b"<") or stripped.startswith(b"{"):
+        raise RuntimeError(f"Google Static Maps recusou o pedido: {content[:200]!r}")
+    if not (content.startswith(b"\x89PNG") or content.startswith(b"GIF") or content.startswith(b"\xff\xd8")):
+        raise RuntimeError("Google Static Maps não devolveu uma imagem.")
+    return content
 
 
 def maps_url(lat: float, lng: float) -> str:
@@ -373,7 +329,7 @@ async def build_radius_map(
     radius: Any = None,
     unit: str | None = None,
 ) -> dict:
-    """Geocodifica (se preciso), desenha o mapa e guarda o PNG para o telefone."""
+    """Geocodifica (se preciso), pede o PNG ao Google e guarda para o telefone."""
     try:
         radius_m = validate_radius_m(parse_radius_meters(radius, unit))
     except ValueError as exc:
@@ -398,6 +354,8 @@ async def build_radius_map(
                 lng = geo["lng"]
                 display_name = geo["display_name"] or display_name
             png = await render_radius_map(client, lat, lng, radius_m)
+    except MissingMapsApiKey as exc:
+        return {"error": str(exc)}
     except Exception:
         log.exception("Failed to build radius map")
         return {"error": "Não consegui montar o mapa agora. Tente de novo em instantes."}
@@ -414,6 +372,7 @@ async def build_radius_map(
         "lng": round(lng, 6),
         "radius_m": int(round(radius_m)),
         "radius_label": format_radius(radius_m),
+        "area_label": format_area(radius_m),
         "maps_url": maps_url(lat, lng),
     }
     if assumed_km:

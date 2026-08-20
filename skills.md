@@ -495,14 +495,14 @@ A Aisha escolhe automaticamente o melhor modelo para cada tarefa — você não 
 | Resumo de documentos PDF/DOCX e OCR | `gpt-5.6-terra` |
 | Análise de vídeo YouTube | `gemini-3.6-flash` (fallback: `gemini-2.5-flash`); vídeo longo: legendas ou Whisper + TXT |
 | Leitura de páginas web | Jina Reader + `gpt-5.6-terra` |
-| Mapa com raio | Nominatim + tiles OSM + PyMuPDF, tool `draw_radius_map` |
+| Mapa com raio | Nominatim + Google Maps Static API, tool `draw_radius_map` |
 | Memória de longo prazo | `text-embedding-3-small` + tools `save_memory` / `forget_memory` |
 
 ---
 
 ## 15. Mapa com raio (círculo em torno de um ponto)
 
-A Aisha monta um **mapa real** (OpenStreetMap) com um círculo do raio que você pedir, centrado no endereço.
+A Aisha monta um **mapa real** (Google Maps, visual CalcMaps) com um círculo azul do raio que você pedir, centrado no endereço.
 
 ### Como usar
 
@@ -513,8 +513,8 @@ A Aisha monta um **mapa real** (OpenStreetMap) com um círculo do raio que você
 ```
 
 **Resposta da Aisha:**
-- Uma **imagem** do mapa com o ponto marcado e o círculo do raio
-- Texto com o endereço encontrado, coordenadas, o raio e um link para abrir no Google Maps
+- Uma **imagem** do mapa (ruas Google, pino vermelho, círculo azul)
+- Texto com o endereço encontrado, coordenadas, o raio, a área do círculo e um link para abrir no Google Maps
 
 ### Unidades
 
@@ -527,7 +527,8 @@ A Aisha monta um **mapa real** (OpenStreetMap) com um círculo do raio que você
 - Se o endereço for ambíguo, ela lista as opções e pergunta qual usar
 - Se faltar o endereço ou o raio, ela pergunta o que falta
 - Follow-up funciona: *"agora com 5 km"* reusa o último ponto
-- Isso **não** é uma imagem gerada por IA — o mapa é geográfico de verdade
+- Isso **não** é uma imagem gerada por IA — o mapa vem da Google Maps Static API
+- Requer `GOOGLE_MAPS_API_KEY` no servidor (Maps Static API ativada no Google Cloud)
 
 ---
 
