@@ -16,6 +16,7 @@ from apscheduler import AsyncScheduler
 from apscheduler.datastores.sqlalchemy import SQLAlchemyDataStore
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
+from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from aisha.skills.chat import chat_with_webpage, classify, classify_pending_response, wants_new_session
@@ -24,6 +25,7 @@ from aisha.config import (
     BASE_URL,
     DATABASE_PASSWORD,
     GRAPH_API_URL,
+    OPENAI_API_KEY,
     SUPABASE_URL,
     WEBHOOK_VERIFY_TOKEN,
     WHATSAPP_APP_SECRET,
@@ -74,8 +76,9 @@ from aisha.skills.raw_transcription_state import (
     pop_raw_transcription_async,
     store_raw_transcription,
 )
-from aisha.skills.reminder import handle_reminder
+from aisha.skills.reminder import handle_reminder, restore_reminder_jobs
 from aisha.skills.scheduled_task import handle_scheduled_task, restore_scheduled_jobs
+from aisha.whatsapp_http import aclose as aclose_whatsapp_client
 from aisha.session import delete_session, get_response_id, upsert_session
 from aisha.skills.timezone_inference import infer_timezone
 from aisha.skills.transcribe import transcribe_audio_bytes
@@ -122,6 +125,7 @@ log = logging.getLogger(__name__)
 
 http_client: httpx.AsyncClient
 scheduler: AsyncScheduler
+_openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 _background_tasks: set[asyncio.Task] = set()
 LONG_TRANSCRIPTION_WORD_LIMIT = 500
 TRANSCRIPTION_PREVIEW_WORDS = 60
@@ -220,6 +224,11 @@ async def lifespan(app: FastAPI):
                 log.info(f"Restored {restored} scheduled task(s)")
             except Exception:
                 log.exception("Failed to restore scheduled jobs")
+            try:
+                restored = await restore_reminder_jobs(sched)
+                log.info(f"Restored {restored} reminder(s)")
+            except Exception:
+                log.exception("Failed to restore reminder jobs")
 
         _spawn(_restore_jobs())
         log.info("WhatsApp agent started")
@@ -228,6 +237,7 @@ async def lifespan(app: FastAPI):
     cleanup_task.cancel()
     await http_client.aclose()
     await aclose_supabase_client()
+    await aclose_whatsapp_client()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -372,10 +382,7 @@ Do not include any explanation."""
 
 async def _resolve_tz_from_text(text: str) -> str | None:
     """Ask the LLM to resolve a city/country name to an IANA timezone. Returns None if unresolvable."""
-    from openai import AsyncOpenAI
-    from aisha.config import OPENAI_API_KEY
-    client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-    resp = await client.chat.completions.create(
+    resp = await _openai_client.chat.completions.create(
         model=EXTRACT_MODEL,
         service_tier=OPENAI_SERVICE_TIER,
         messages=[
@@ -533,8 +540,9 @@ async def _execute_pending(sender: str, text: str) -> bool:
         await send_message(sender, "⏳ Lendo página...")
         await increment_stat(sender, "webpages")
         try:
-            content = await fetch_page(pending_page.url)
-            prev_id = await get_response_id(sender)
+            content, prev_id = await asyncio.gather(
+                fetch_page(pending_page.url), get_response_id(sender)
+            )
             result = await chat_with_webpage(content, pending_page.url, text, prev_id)
             if result.response_id:
                 await upsert_session(sender, result.response_id)
@@ -657,8 +665,6 @@ async def handle_chat(sender: str, text: str, msg_id: str = ""):
             await delete_session(sender)
             log.info(f"Session reset requested by {sender}")
 
-        if msg_id:
-            _spawn(send_typing(msg_id))
         prev_id = await get_response_id(sender)
 
         if is_trivial_message(text):
@@ -881,8 +887,10 @@ async def handle_document(sender: str, message: dict):
         await increment_stat(sender, "documents")
 
         # For scanned PDFs over the page limit, ask which pages the user wants
+        pdf_info: tuple[bool, int] | None = None
         if mime_type == "application/pdf":
-            is_scanned, total_pages = await asyncio.to_thread(get_pdf_info, doc_bytes)
+            pdf_info = await asyncio.to_thread(get_pdf_info, doc_bytes)
+            is_scanned, total_pages = pdf_info
             if is_scanned and total_pages > MAX_SCANNED_PAGES:
                 caption = doc.get("caption", "").strip()
                 store_pending_document(sender, doc_bytes, total_pages, caption or None)
@@ -895,7 +903,7 @@ async def handle_document(sender: str, message: dict):
                 )
                 return
 
-        document_text = await extract_text_async(doc_bytes, mime_type)
+        document_text = await extract_text_async(doc_bytes, mime_type, pdf_info=pdf_info)
         log.info(f"Text extracted: {len(document_text)} chars from {filename}")
 
         if not document_text.strip():
@@ -922,8 +930,9 @@ async def _deliver_agent_result(sender: str, result) -> None:
     if result.text:
         await send_message(sender, result.text)
     if getattr(result, "tools_called", None):
-        for tool_name in result.tools_called:
-            await increment_stat(sender, f"tool_{tool_name}")
+        await asyncio.gather(
+            *(increment_stat(sender, f"tool_{name}") for name in result.tools_called)
+        )
         if "analyze_youtube_video" in result.tools_called:
             pending = pop_pending_transcript(sender)
             if pending:

@@ -63,6 +63,7 @@ async def tool_create_reminder(args: dict, ctx: ToolContext) -> str:
         is_recurring=is_recurring,
         rrule=rrule,
         scheduler=ctx.scheduler,
+        user_tz=ctx.user_tz,
     )
     await update_job_id(reminder_id, job_id)
 
@@ -104,9 +105,7 @@ async def tool_list_reminders(args: dict, ctx: ToolContext) -> str:
 async def tool_edit_reminder(args: dict, ctx: ToolContext) -> str:
     from aisha.config import REMINDER_LEAD_MINUTES
     from aisha.skills.reminder_store import get_reminders, update_reminder, update_job_id
-    from aisha.skills.reminder import (
-        _schedule_job, _gcal_link, _fmt_local, _parse_dt_iso, _rrule_to_trigger
-    )
+    from aisha.skills.reminder import _schedule_job, _gcal_link, _fmt_local, _parse_dt_iso
 
     reminder_number = args.get("reminder_number", 1)
     new_datetime_iso = args.get("new_datetime_iso")
@@ -157,6 +156,7 @@ async def tool_edit_reminder(args: dict, ctx: ToolContext) -> str:
         is_recurring=row.get("is_recurring", False),
         rrule=rrule,
         scheduler=ctx.scheduler,
+        user_tz=ctx.user_tz,
     )
     await update_job_id(row["id"], new_job_id)
 
