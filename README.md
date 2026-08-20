@@ -191,8 +191,8 @@ handle_chat (texto)
         │
         ├── 0. pedido retroativo de transcrição? ──► refina transcrição bruta (5min TTL)
         ├── 1. estado pendente? ──► CONTINUE / CANCEL / NEW_INTENT
-        ├── 2. saudação trivial? ──► gpt-5.6-luna (sem tools)
-        └── 3. agente (gpt-5.6-terra)
+        ├── 2. saudação trivial? ──► gpt-5.6-luna (Fast mode, sem tools)
+        └── 3. agente (gpt-5.6-sol, Fast mode)
                     └── loop de tools (até 10 iterações, em paralelo)
                           ├── web_search / search_x / image_generation
                           ├── lembretes e tarefas agendadas
@@ -216,7 +216,7 @@ A Aisha mantém contexto de conversa usando a Responses API da OpenAI com `previ
 whatsapp-agent/
 ├── aisha/                      # Pacote principal
 │   ├── app.py                  # FastAPI: webhook assíncrono, APScheduler lifespan
-│   ├── agent.py                # Agentic loop (gpt-5.6-terra) + fast-path (luna)
+│   ├── agent.py                # Agentic loop (gpt-5.6-sol) + fast-path (luna), ambos em Fast mode
 │   ├── models.py               # IDs canônicos dos modelos
 │   ├── routing.py              # Helpers puros de roteamento (testáveis)
 │   ├── config.py               # Variáveis de ambiente
@@ -239,9 +239,9 @@ whatsapp-agent/
 | Linguagem | Python 3.12 |
 | Framework | FastAPI + uvicorn |
 | WhatsApp | Meta Cloud API (WhatsApp Business) |
-| LLM agente | OpenAI gpt-5.6-terra via Responses API |
-| LLM fast-path / extração | OpenAI gpt-5.6-luna |
-| LLM documentos / OCR | OpenAI gpt-5.6-terra |
+| LLM agente | OpenAI gpt-5.6-sol via Responses API, Fast mode |
+| LLM fast-path | OpenAI gpt-5.6-luna, Fast mode |
+| LLM extração / documentos / OCR | OpenAI gpt-5.6-sol, Fast mode |
 | LLM refinamento | Google Gemini 3.6 Flash (fallback: 2.5 Flash) |
 | Transcrição | OpenAI Whisper (whisper-1) |
 | Geração/edição de imagem | image_generation (Responses API) |
@@ -489,13 +489,13 @@ No painel de developers.facebook.com:
 |---|---|
 | WhatsApp Cloud API (service messages) | Gratuito |
 | OpenAI Whisper (transcrição de áudio) | ~$0.006/min |
-| OpenAI gpt-5.6-luna (fast-path / extração) | ~$0.00002/msg |
-| OpenAI gpt-5.6-terra (agente + docs + OCR) | ~$0.003-0.012/msg |
+| OpenAI gpt-5.6-luna (fast-path, Fast mode) | Premium sobre o preço padrão por token |
+| OpenAI gpt-5.6-sol (agente + extração + docs + OCR, Fast mode) | Premium sobre o preço padrão por token |
 | Google Gemini 3.6 Flash (refinamento / YouTube) | ~$0.001/msg |
 | OpenAI gpt-image-1.5 (imagem) | ~$0.02-0.08/imagem |
 | OpenAI web_search (busca) | ~$0.001/chamada |
 | xAI x_search (posts do X) | ~$0.005/chamada + tokens Grok |
-| OpenAI gpt-5.6-terra (tarefa agendada com web search) | ~$0.01-0.02/execução |
+| OpenAI gpt-5.6-sol (tarefa agendada com web search, Fast mode) | Premium sobre o preço padrão por token |
 | OpenAI embeddings (memória) | ~$0.00002/fato |
 | Jina Reader (páginas web) | Gratuito |
 | Supabase | Gratuito (free tier) |

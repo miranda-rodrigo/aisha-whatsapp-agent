@@ -21,7 +21,7 @@ from aisha.config import (
     USER_TIMEZONE,
     WHATSAPP_TOKEN,
 )
-from aisha.models import EXTRACT_MODEL
+from aisha.models import EXTRACT_MODEL, OPENAI_SERVICE_TIER
 from aisha.skills.reminder_store import (
     Reminder,
     cancel_reminder,
@@ -168,6 +168,7 @@ async def _extract(text: str, user_tz: str) -> ReminderExtraction:
     """Call gpt-4o-mini with structured output to extract reminder intent."""
     response = await _client.beta.chat.completions.parse(
         model=EXTRACT_MODEL,
+        service_tier=OPENAI_SERVICE_TIER,
         messages=[
             {"role": "system", "content": _build_extract_system(user_tz)},
             {"role": "user", "content": text},

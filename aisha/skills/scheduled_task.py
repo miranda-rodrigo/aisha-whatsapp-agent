@@ -27,7 +27,7 @@ from aisha.config import (
     WHATSAPP_TOKEN,
 )
 from aisha.messaging import split_whatsapp_text
-from aisha.models import EXTRACT_MODEL
+from aisha.models import EXTRACT_MODEL, OPENAI_SERVICE_TIER
 from aisha.skills.scheduled_task_store import (
     ScheduledTask,
     deactivate_task,
@@ -136,6 +136,7 @@ async def _extract(text: str, user_tz: str) -> TaskExtraction:
     """Call gpt-4o-mini with structured output to extract task intent."""
     response = await _client.beta.chat.completions.parse(
         model=EXTRACT_MODEL,
+        service_tier=OPENAI_SERVICE_TIER,
         messages=[
             {"role": "system", "content": _build_extract_system(user_tz)},
             {"role": "user", "content": text},

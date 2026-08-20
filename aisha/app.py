@@ -31,7 +31,7 @@ from aisha.config import (
 )
 from aisha.messaging import split_whatsapp_text, typing_indicator_payload
 from aisha.supabase_http import aclose as aclose_supabase_client
-from aisha.models import EXTRACT_MODEL
+from aisha.models import EXTRACT_MODEL, OPENAI_SERVICE_TIER
 from aisha.routing import (
     contains_aisha as _contains_aisha,
     is_download_intent as _is_download_intent,
@@ -377,6 +377,7 @@ async def _resolve_tz_from_text(text: str) -> str | None:
     client = AsyncOpenAI(api_key=OPENAI_API_KEY)
     resp = await client.chat.completions.create(
         model=EXTRACT_MODEL,
+        service_tier=OPENAI_SERVICE_TIER,
         messages=[
             {"role": "system", "content": _TZ_RESOLVE_SYSTEM},
             {"role": "user", "content": text},

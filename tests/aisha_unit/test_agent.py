@@ -86,6 +86,8 @@ class AgentLoopTests(unittest.IsolatedAsyncioTestCase):
 
         kwargs = self.create.await_args.kwargs
         self.assertEqual(kwargs["model"], agent.FAST_MODEL)
+        self.assertEqual(kwargs["model"], "gpt-5.6-luna")
+        self.assertEqual(kwargs["service_tier"], "fast")
         self.assertEqual(kwargs["input"], "oi")
         self.assertEqual(kwargs["previous_response_id"], "previous-1")
         self.assertIn("Europe/Lisbon", kwargs["instructions"])
@@ -112,6 +114,9 @@ class AgentLoopTests(unittest.IsolatedAsyncioTestCase):
 
         execute.assert_awaited_once()
         self.assertEqual(execute.await_args.args[:2], ("web_search", '{"query":"agora"}'))
+        for call in self.create.await_args_list:
+            self.assertEqual(call.kwargs["model"], "gpt-5.6-sol")
+            self.assertEqual(call.kwargs["service_tier"], "fast")
         second_kwargs = self.create.await_args_list[1].kwargs
         self.assertEqual(second_kwargs["previous_response_id"], "step-1")
         self.assertEqual(

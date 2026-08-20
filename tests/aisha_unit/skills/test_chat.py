@@ -80,6 +80,7 @@ class ChatAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, chat.ChatResult(text="Tudo bem", response_id="resp-1"))
         self.assertEqual(create.await_args.kwargs["previous_response_id"], "resp-anterior")
         self.assertEqual(create.await_args.kwargs["model"], chat.FAST_MODEL)
+        self.assertEqual(create.await_args.kwargs["service_tier"], "fast")
 
     async def test_chat_complex_extrai_texto_e_imagem(self):
         image = b"imagem"
@@ -97,6 +98,8 @@ class ChatAsyncTests(unittest.IsolatedAsyncioTestCase):
             create.await_args.kwargs["tools"],
             [{"type": "web_search"}, {"type": "image_generation"}],
         )
+        self.assertEqual(create.await_args.kwargs["model"], "gpt-5.6-sol")
+        self.assertEqual(create.await_args.kwargs["service_tier"], "fast")
 
     async def test_chat_com_imagem_codifica_entrada(self):
         response = text_response("Editada")

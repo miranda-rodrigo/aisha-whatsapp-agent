@@ -15,7 +15,7 @@ from pathlib import Path
 from openai import AsyncOpenAI
 
 from aisha.config import BASE_URL, OPENAI_API_KEY, USER_TIMEZONE
-from aisha.models import AGENT_MODEL, FAST_MODEL
+from aisha.models import AGENT_MODEL, FAST_MODEL, OPENAI_SERVICE_TIER
 from aisha.tools import TOOL_DEFINITIONS, ToolContext, execute_tool
 
 log = logging.getLogger(__name__)
@@ -167,6 +167,7 @@ async def run_fast_path(
     instructions = _build_system_prompt(profile, user_tz)
     kwargs: dict = {
         "model": FAST_MODEL,
+        "service_tier": OPENAI_SERVICE_TIER,
         "instructions": instructions,
         "input": user_input,
     }
@@ -243,6 +244,7 @@ async def run_agent(
 
     kwargs: dict = {
         "model": AGENT_MODEL,
+        "service_tier": OPENAI_SERVICE_TIER,
         "instructions": instructions,
         "input": user_input,
         "tools": TOOL_DEFINITIONS,
@@ -286,6 +288,7 @@ async def run_agent(
 
         kwargs = {
             "model": AGENT_MODEL,
+            "service_tier": OPENAI_SERVICE_TIER,
             "instructions": instructions,
             "input": tool_outputs,
             "tools": TOOL_DEFINITIONS,
