@@ -121,8 +121,9 @@ Aisha é uma assistente pessoal orientada a tarefas que roda no WhatsApp Busines
 - Informe um endereço e um raio; a Aisha envia um mapa Google (visual CalcMaps) com círculo azul e pino vermelho
 - Unidades: metros, km (padrão se você só mandar o número) ou milhas; faixa de 50 m a 50 km
 - Se o endereço for ambíguo, ela lista as opções. Follow-up ("agora com 5 km") reusa o último ponto
-- Não usa geração de imagem por IA — geocodifica no Nominatim e pede o PNG à Google Maps Static API
-- Requer `GOOGLE_MAPS_API_KEY`
+- Não usa geração de imagem por IA — geocodifica no Nominatim e desenha o círculo no mapa
+- Com `GOOGLE_MAPS_API_KEY` no servidor, o PNG vem da Google Maps Static API (visual CalcMaps)
+- Sem essa chave, a Aisha gera o mesmo círculo sobre OpenStreetMap (o mapa sai mesmo assim)
 - Exemplos: "mapa de 2 km em torno da Av. Beira Mar 123, Fortaleza"
 
 ### Lembretes
@@ -399,7 +400,7 @@ WHATSAPP_APP_SECRET=app_secret_da_meta
 | `REMINDER_LEAD_MINUTES` | Minutos de antecedência para o aviso do lembrete (padrão: `15`) |
 | `GEMINI_API_KEY` | API key do Google AI Studio para análise de vídeos YouTube (opcional) |
 | `XAI_API_KEY` | API key da xAI (console.x.ai) para buscar o que pessoas estão falando no X (opcional) |
-| `GOOGLE_MAPS_API_KEY` | Chave da Google Maps Static API para mapa com raio (opcional; sem ela a skill recusa) |
+| `GOOGLE_MAPS_API_KEY` | Chave da Google Maps Static API para mapa com raio (opcional; sem ela usa OpenStreetMap) |
 | `WHATSAPP_APP_SECRET` | App Secret da Meta para validar `X-Hub-Signature-256`. Se vazio, a verificação é pulada. |
 | `PORT` | Porta do servidor (Railway injeta automaticamente; padrão: 8000) |
 
