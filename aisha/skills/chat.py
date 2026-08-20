@@ -23,7 +23,12 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
 from aisha.config import OPENAI_API_KEY, USER_TIMEZONE
-from aisha.models import AGENT_MODEL, DOCUMENT_MODEL, EXTRACT_MODEL, FAST_MODEL
+from aisha.models import (
+    AGENT_MODEL,
+    DOCUMENT_MODEL,
+    EXTRACT_MODEL,
+    OPENAI_SERVICE_TIER,
+)
 from aisha.routing import wants_new_session as _wants_new_session
 
 log = logging.getLogger(__name__)
@@ -150,6 +155,7 @@ async def classify(user_input: str) -> str:
     """Classify intent using gpt-4.1-mini. Returns one of the _VALID_LABELS."""
     response = await _client.chat.completions.create(
         model=_CLASSIFIER_MODEL,
+        service_tier=OPENAI_SERVICE_TIER,
         messages=[
             {"role": "system", "content": _CLASSIFIER_PROMPT},
             {"role": "user", "content": user_input},
@@ -186,6 +192,7 @@ async def classify_pending_response(user_input: str, pending_description: str) -
     prompt = _PENDING_CLASSIFIER_PROMPT.format(pending_description=pending_description)
     response = await _client.chat.completions.create(
         model=_CLASSIFIER_MODEL,
+        service_tier=OPENAI_SERVICE_TIER,
         messages=[
             {"role": "system", "content": prompt},
             {"role": "user", "content": user_input},
@@ -256,7 +263,8 @@ async def _chat_simple(
 ) -> ChatResult:
     """Handle simple messages with gpt-4.1 via Responses API."""
     kwargs: dict = {
-        "model": FAST_MODEL,
+        "model": AGENT_MODEL,
+        "service_tier": OPENAI_SERVICE_TIER,
         "instructions": _build_instructions(SYSTEM_PROMPT, profile),
         "input": user_input,
     }
@@ -285,6 +293,7 @@ async def _detect_self_action(user_input: str) -> SelfAction:
     """Detect sub-intent within SELF category using structured output."""
     response = await _client.beta.chat.completions.parse(
         model=EXTRACT_MODEL,
+        service_tier=OPENAI_SERVICE_TIER,
         messages=[
             {"role": "system", "content": _SELF_ACTION_PROMPT},
             {"role": "user", "content": user_input},
@@ -361,7 +370,8 @@ async def _chat_self(
         input_text = f"{user_input}\n\n---\n{extra_user_data}"
 
     kwargs: dict = {
-        "model": FAST_MODEL,
+        "model": AGENT_MODEL,
+        "service_tier": OPENAI_SERVICE_TIER,
         "instructions": instructions,
         "input": input_text,
     }
@@ -394,6 +404,7 @@ async def _chat_complex(
     """Handle complex messages with gpt-5.4 + web_search + image_generation."""
     kwargs: dict = {
         "model": AGENT_MODEL,
+        "service_tier": OPENAI_SERVICE_TIER,
         "instructions": _build_instructions(SYSTEM_PROMPT, profile),
         "input": user_input,
         "tools": [
@@ -453,6 +464,7 @@ async def chat_with_image(
 
     kwargs: dict = {
         "model": AGENT_MODEL,
+        "service_tier": OPENAI_SERVICE_TIER,
         "instructions": _build_instructions(f"{SYSTEM_PROMPT}\n\n{_IMAGE_INSTRUCTIONS}", None),
         "input": multimodal_input,
         "tools": [{"type": "image_generation"}],
@@ -508,6 +520,7 @@ async def chat_with_document(
 
     kwargs: dict = {
         "model": DOCUMENT_MODEL,
+        "service_tier": OPENAI_SERVICE_TIER,
         "instructions": _build_instructions(f"{SYSTEM_PROMPT}\n\n{_DOCUMENT_INSTRUCTIONS}", None),
         "input": user_message,
     }
@@ -545,6 +558,7 @@ async def chat_with_webpage(
 
     kwargs: dict = {
         "model": DOCUMENT_MODEL,
+        "service_tier": OPENAI_SERVICE_TIER,
         "instructions": _build_instructions(f"{SYSTEM_PROMPT}\n\n{_WEBPAGE_INSTRUCTIONS}", None),
         "input": user_message,
     }

@@ -142,6 +142,8 @@ class DocumentSummaryTests(IsolatedAsyncioTestCase):
         self.assertEqual(result, "resultado")
         kwargs = create.await_args.kwargs
         self.assertEqual(kwargs["model"], document.DOCUMENT_MODEL)
+        self.assertEqual(kwargs["model"], "gpt-5.6-sol")
+        self.assertEqual(kwargs["service_tier"], "fast")
         self.assertEqual(kwargs["temperature"], 0.3)
         user_message = kwargs["messages"][1]["content"]
         self.assertTrue(user_message.startswith("INSTRUÇÃO DO USUÁRIO: Liste riscos"))

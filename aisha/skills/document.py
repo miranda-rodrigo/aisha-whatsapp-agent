@@ -10,7 +10,7 @@ from pathlib import Path
 from openai import AsyncOpenAI
 
 from aisha.config import OPENAI_API_KEY
-from aisha.models import DOCUMENT_MODEL, VISION_OCR_MODEL
+from aisha.models import DOCUMENT_MODEL, OPENAI_SERVICE_TIER, VISION_OCR_MODEL
 
 log = logging.getLogger(__name__)
 
@@ -96,6 +96,7 @@ async def extract_scanned_pages(
 
     response = await _client.responses.create(
         model=VISION_OCR_MODEL,
+        service_tier=OPENAI_SERVICE_TIER,
         input=[{"role": "user", "content": content}],
     )
 
@@ -184,6 +185,7 @@ async def summarize_document(
 
     response = await _client.chat.completions.create(
         model=DOCUMENT_MODEL,
+        service_tier=OPENAI_SERVICE_TIER,
         messages=[
             {"role": "system", "content": _SUMMARIZE_PROMPT},
             {"role": "user", "content": user_message},
