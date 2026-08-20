@@ -1,0 +1,10 @@
+{
+  "name": "Aisha WhatsApp agent",
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "website-dev",
+      "command": "cd website && pnpm dev"
+    }
+  ]
+}
