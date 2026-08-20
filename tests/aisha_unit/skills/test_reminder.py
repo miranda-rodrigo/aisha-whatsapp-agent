@@ -53,6 +53,19 @@ class ReminderPureTests(unittest.TestCase):
         )
 
     @patch.object(reminder, "CronTrigger")
+    def test_rrule_cron_aplica_antecedencia_no_horario(self, cron_trigger):
+        first = datetime(2030, 1, 1, 8, 45, tzinfo=timezone.utc)
+        reminder._rrule_to_trigger("CRON:0 9 * * 1", first, "America/Sao_Paulo", lead_minutes=15)
+        cron_trigger.assert_called_once_with(
+            minute="45",
+            hour="8",
+            day="*",
+            month="*",
+            day_of_week="1",
+            timezone="America/Sao_Paulo",
+        )
+
+    @patch.object(reminder, "CronTrigger")
     def test_rrule_cron_invalido_recua_para_diario(self, cron_trigger):
         first = datetime(2030, 1, 1, 12, 0, tzinfo=timezone.utc)
         reminder._rrule_to_trigger("CRON:invalido", first, "UTC")
@@ -99,6 +112,7 @@ class ReminderAsyncTests(unittest.IsolatedAsyncioTestCase):
         kwargs = scheduler.add_schedule.await_args.kwargs
         self.assertEqual(kwargs["id"], "r1")
         self.assertEqual(kwargs["kwargs"]["message"], "Consulta")
+        self.assertEqual(kwargs["conflict_policy"].name, "replace")
 
     async def test_criacao_valida_entrada_e_persiste(self):
         scheduler = MagicMock()

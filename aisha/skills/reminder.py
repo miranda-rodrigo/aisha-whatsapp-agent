@@ -8,7 +8,7 @@ from typing import Literal
 from urllib.parse import urlencode
 
 import dateparser
-from apscheduler import AsyncScheduler
+from apscheduler import AsyncScheduler, ConflictPolicy
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from openai import AsyncOpenAI
@@ -231,7 +231,7 @@ async def _schedule_job(
     event_display: str | None = None
 
     if is_recurring and rrule:
-        trigger = _rrule_to_trigger(rrule, fire_at, user_tz)
+        trigger = _rrule_to_trigger(rrule, fire_at, user_tz, lead_minutes)
     else:
         # A fire time already in the past (e.g. "me lembra em 5 min" with a
         # 15-min lead) would be silently dropped by the misfire grace window.
@@ -254,18 +254,39 @@ async def _schedule_job(
             "event_display": event_display,
         },
         misfire_grace_time=timedelta(seconds=120),
+        conflict_policy=ConflictPolicy.replace,
     )
     return str(schedule_id)
 
 
-def _rrule_to_trigger(rrule: str, first_fire: datetime, user_tz: str) -> CronTrigger:
-    """Convert an RRULE (or ``CRON:<expr>``) string to an APScheduler CronTrigger."""
+def _shift_cron_by_lead(fields: list[str], lead_minutes: int) -> list[str]:
+    """Subtract lead from numeric hour/minute cron fields. Leave wildcards as-is."""
+    if lead_minutes <= 0:
+        return fields
+    minute, hour = fields[0], fields[1]
+    if not minute.isdigit() or not hour.isdigit():
+        return fields
+    total = (int(hour) * 60 + int(minute) - lead_minutes) % (24 * 60)
+    new_hour, new_min = divmod(total, 60)
+    return [str(new_min), str(new_hour), fields[2], fields[3], fields[4]]
+
+
+def _rrule_to_trigger(
+    rrule: str, first_fire: datetime, user_tz: str, lead_minutes: int = 0
+) -> CronTrigger:
+    """Convert an RRULE (or ``CRON:<expr>``) string to an APScheduler CronTrigger.
+
+    ``CRON:`` expressions describe the event time; ``lead_minutes`` shifts
+    numeric hour/minute so the job fires with the same advance notice as
+    one-shot reminders. RFC 5545 already uses ``first_fire`` (event − lead).
+    """
     import zoneinfo
 
     if rrule.startswith("CRON:"):
         expr = rrule[len("CRON:"):].strip()
         fields = expr.split()
         if len(fields) == 5:
+            fields = _shift_cron_by_lead(fields, lead_minutes)
             return CronTrigger(
                 minute=fields[0],
                 hour=fields[1],
@@ -496,8 +517,9 @@ async def restore_reminder_jobs(scheduler: AsyncScheduler) -> int:
     APScheduler's persistent datastore keeps schedules across restarts, but a
     one-shot reminder whose fire time passed while the app was down (beyond the
     misfire grace window) is dropped silently and stays "pending" forever.
-    ``add_schedule`` uses conflict_policy=do_nothing, so re-adding an id that
-    is still alive in the datastore is a no-op.
+    ``_schedule_job`` uses conflict_policy=replace so a leftover schedule with
+    the same id (including ones created with the old broken CRON parser) is
+    overwritten with a correct trigger.
     """
     from aisha.skills.reminder_store import get_all_pending_reminders
 
