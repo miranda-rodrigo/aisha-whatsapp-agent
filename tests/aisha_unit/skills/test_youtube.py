@@ -2,9 +2,7 @@
 
 from datetime import datetime, timedelta
 from unittest import IsolatedAsyncioTestCase, TestCase
-from unittest.mock import AsyncMock, MagicMock, patch
-
-from tests.aisha_unit._helpers import namespace
+from unittest.mock import AsyncMock, patch
 
 from aisha.skills import youtube
 
@@ -43,30 +41,29 @@ class YoutubeParserTests(TestCase):
 
 
 class YoutubeAnalysisTests(IsolatedAsyncioTestCase):
-    async def test_falls_back_and_uses_default_prompt(self):
-        generate = AsyncMock(
-            side_effect=[RuntimeError("primary unavailable"), namespace(text="resumo")]
-        )
-        client = namespace(aio=namespace(models=namespace(generate_content=generate)))
-        part = MagicMock()
-
+    async def test_short_video_uses_gemini_uri_path(self):
         with (
-            patch.object(youtube, "_get_client", return_value=client),
-            patch.object(youtube.types.Part, "from_uri", return_value=part) as from_uri,
+            patch.object(youtube, "_probe_video", AsyncMock(return_value=None)),
+            patch.object(
+                youtube, "_analyze_via_gemini", AsyncMock(return_value="resumo")
+            ) as gemini,
         ):
             result = await youtube.analyze_video(
                 "https://youtu.be/abcdefghijk", "   "
             )
 
-        self.assertEqual(result, "resumo")
-        self.assertEqual(
-            [call.kwargs["model"] for call in generate.await_args_list],
-            [youtube._MODEL, youtube._FALLBACK_MODEL],
-        )
-        self.assertEqual(
-            generate.await_args_list[0].kwargs["contents"],
-            [part, youtube._DEFAULT_PROMPT],
-        )
-        from_uri.assert_called_with(
-            file_uri="https://youtu.be/abcdefghijk", mime_type="video/mp4"
-        )
+        self.assertEqual(result.text, "resumo")
+        gemini.assert_awaited_once_with("https://youtu.be/abcdefghijk", "   ")
+
+    async def test_transcript_summary_uses_luna(self):
+        complete = AsyncMock(return_value="resumo luna")
+
+        with patch("aisha.openai_chat.chat_complete_async", complete):
+            result = await youtube._summarize_transcript("fala bruta", "resume")
+
+        self.assertEqual(result, "resumo luna")
+        system, user = complete.await_args.args
+        self.assertEqual(system, youtube._SUMMARIZE_SYSTEM)
+        self.assertIn("resume", user)
+        self.assertIn("fala bruta", user)
+        complete.assert_awaited_once()

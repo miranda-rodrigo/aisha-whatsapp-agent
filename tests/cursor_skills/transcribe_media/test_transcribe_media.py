@@ -181,6 +181,8 @@ class SkillCopyTests(unittest.TestCase):
         for rel in (
             "scripts/transcribe.py",
             "scripts/cleanup.py",
+            "scripts/chat.py",
+            "scripts/improve.py",
             "SKILL.md",
             "references/refine-prompt.md",
         ):
@@ -191,3 +193,62 @@ class SkillCopyTests(unittest.TestCase):
                 encoding="utf-8"
             )
             self.assertEqual(cursor, claude, f"{rel} diverged between Cursor and Claude copies")
+
+
+class ChatContractTests(unittest.TestCase):
+    def test_chat_model_is_luna(self):
+        chat = _load("chat")
+        self.assertEqual(chat.CHAT_MODEL, "gpt-5.6-luna")
+        self.assertEqual(chat.REASONING_EFFORT, "none")
+
+    def test_chat_chunks_stay_under_long_context_surcharge(self):
+        chat = _load("chat")
+        self.assertGreaterEqual(chat.CHAT_CHUNK_CHARS, 100_000)
+        self.assertLess(chat.CHAT_CHUNK_CHARS, 1_000_000)
+
+
+class ImproveTests(unittest.TestCase):
+    def test_improve_does_not_overwrite_raw(self):
+        improve = _load("improve")
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = Path(tmp) / "raw.txt"
+            raw.write_text("fala bruta\n", encoding="utf-8")
+            dest = Path(tmp) / "improved.txt"
+            prompt = Path(tmp) / "prompt.md"
+            prompt.write_text("edite", encoding="utf-8")
+
+            with patch.object(improve.chat, "chat_complete", return_value="fala limpa"):
+                payload = improve.improve_file(raw, dest, str(prompt))
+
+            self.assertEqual(raw.read_text(encoding="utf-8"), "fala bruta\n")
+            self.assertEqual(dest.read_text(encoding="utf-8"), "fala limpa\n")
+            self.assertEqual(payload["model"], "gpt-5.6-luna")
+            self.assertEqual(payload["chunk_count"], 1)
+
+    def test_refuses_to_write_over_raw_path(self):
+        improve = _load("improve")
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = Path(tmp) / "raw.txt"
+            raw.write_text("keep\n", encoding="utf-8")
+            prompt = Path(tmp) / "prompt.md"
+            prompt.write_text("edite", encoding="utf-8")
+            with (
+                patch.object(improve.chat, "chat_complete", return_value="novo"),
+                self.assertRaises(SystemExit),
+            ):
+                improve.improve_file(raw, raw, str(prompt))
+            self.assertEqual(raw.read_text(encoding="utf-8"), "keep\n")
+
+
+class WhisperSkipRecodeTests(unittest.TestCase):
+    def test_small_ogg_is_sent_raw(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ogg = Path(tmp) / "note.ogg"
+            ogg.write_bytes(b"ogg")
+            self.assertTrue(transcribe._should_send_raw(ogg))
+
+    def test_unknown_extension_is_not_sent_raw(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            aac = Path(tmp) / "note.aac"
+            aac.write_bytes(b"aac")
+            self.assertFalse(transcribe._should_send_raw(aac))

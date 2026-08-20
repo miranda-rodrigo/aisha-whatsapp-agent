@@ -1,6 +1,6 @@
 # Prompt editorial — melhoria com IA
 
-Use este prompt ao reescrever `raw.txt` em `improved.txt`. Você é o editor. Não chame Gemini nem outra API extra. Não substitua `raw.txt`.
+Use este prompt ao reescrever `raw.txt` em `improved.txt`. Não substitua `raw.txt`.
 
 ## Instrução
 

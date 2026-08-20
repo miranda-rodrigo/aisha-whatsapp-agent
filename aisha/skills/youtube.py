@@ -364,32 +364,46 @@ async def _fetch_transcript(url: str) -> str:
     return await transcribe_audio_bytes(audio_bytes, mime)
 
 
-async def _generate_text(prompt: str) -> str:
-    async def _generate(model: str) -> str:
-        response = await _get_client().aio.models.generate_content(
-            model=model,
-            contents=prompt,
-        )
-        return (response.text or "").strip()
+_SUMMARIZE_SYSTEM = (
+    "Você resume ou analisa transcrições. Não invente trechos que não estejam "
+    "na fonte. Responda só o pedido, sem preâmbulo."
+)
 
-    try:
-        return await _generate(_MODEL)
-    except Exception as primary_exc:
-        log.warning(f"Primary text model {_MODEL} failed ({primary_exc}); trying {_FALLBACK_MODEL}")
-        return await _generate(_FALLBACK_MODEL)
+
+async def _generate_text(prompt: str) -> str:
+    from aisha.openai_chat import chat_complete_async
+
+    return await chat_complete_async(_SUMMARIZE_SYSTEM, prompt)
 
 
 async def _summarize_transcript(transcript: str, instruction: str) -> str:
+    from aisha.openai_chat import chunk_text, map_chat_chunks_async
+
     if is_transcript_instruction(instruction) or not instruction.strip():
         task = _DEFAULT_PROMPT
     else:
         task = instruction.strip()
-    prompt = (
-        f"{task}\n\n"
-        "Use a transcrição abaixo como fonte. Não invente trechos que não estejam nela.\n\n"
-        f"TRANSCRIÇÃO:\n{transcript}"
-    )
-    return await _generate_text(prompt)
+    chunks = chunk_text(transcript)
+    if len(chunks) <= 1:
+        prompt = (
+            f"{task}\n\n"
+            "Use a transcrição abaixo como fonte. Não invente trechos que não estejam nela.\n\n"
+            f"TRANSCRIÇÃO:\n{transcript}"
+        )
+        return await _generate_text(prompt)
+
+    def _user_for_chunk(index: int, chunk: str, total: int) -> str:
+        return (
+            f"{task}\n\n"
+            f"Resuma o trecho {index + 1} de {total}. "
+            "Use só este trecho como fonte.\n\n"
+            f"{chunk}"
+        )
+
+    partial = await map_chat_chunks_async(_SUMMARIZE_SYSTEM, chunks, _user_for_chunk)
+    joined = "\n\n".join(partial)
+    final_user = f"{task}\n\nUna estes resumos parciais num texto único:\n\n{joined}"
+    return await _generate_text(final_user)
 
 
 def format_long_video_reply(

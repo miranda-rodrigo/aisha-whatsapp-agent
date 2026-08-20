@@ -3,6 +3,7 @@
 import json
 import unittest
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from tests.aisha_unit._helpers import configure_test_env
@@ -57,7 +58,14 @@ class DispatcherTests(ToolTestCase):
 class SimpleWrapperTests(ToolTestCase):
     async def test_youtube_valida_url_e_delega(self):
         self.assertIn("error", decoded(await youtube.tool_analyze_youtube_video({}, self.ctx)))
-        with patch("aisha.skills.youtube.analyze_video", AsyncMock(return_value="análise")) as analyze:
+        analysis = SimpleNamespace(
+            text="análise",
+            download_token=None,
+            download_link=None,
+            filename=None,
+            is_long=False,
+        )
+        with patch("aisha.skills.youtube.analyze_video", AsyncMock(return_value=analysis)) as analyze:
             result = decoded(
                 await youtube.tool_analyze_youtube_video(
                     {"url": "https://youtu.be/abc", "instruction": "resuma"}, self.ctx

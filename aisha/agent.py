@@ -15,7 +15,7 @@ from pathlib import Path
 from openai import AsyncOpenAI
 
 from aisha.config import BASE_URL, OPENAI_API_KEY, USER_TIMEZONE
-from aisha.models import AGENT_MODEL, FAST_MODEL, OPENAI_SERVICE_TIER
+from aisha.models import AGENT_MODEL, FAST_MODEL, OPENAI_SERVICE_TIER, REASONING_EFFORT
 from aisha.tools import TOOL_DEFINITIONS, ToolContext, execute_tool
 
 log = logging.getLogger(__name__)
@@ -179,6 +179,7 @@ async def run_fast_path(
         "service_tier": OPENAI_SERVICE_TIER,
         "instructions": instructions,
         "input": user_input,
+        "reasoning": {"effort": REASONING_EFFORT},
     }
     if previous_response_id:
         kwargs["previous_response_id"] = previous_response_id
