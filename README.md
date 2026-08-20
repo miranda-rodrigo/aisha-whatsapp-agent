@@ -1,6 +1,6 @@
 # Aisha — Assistente Pessoal via WhatsApp
 
-Aisha é uma assistente pessoal orientada a tarefas que roda no WhatsApp Business API. Ela não é um chatbot para bate-papo — seu papel é executar ações concretas: transcrever áudios, pesquisar na web, gerar imagens, criar lembretes, agendar tarefas recorrentes, analisar documentos e vídeos do YouTube — tudo pelo WhatsApp.
+Aisha é uma assistente pessoal orientada a tarefas que roda no WhatsApp Business API. Ela não é um chatbot para bate-papo — seu papel é executar ações concretas: transcrever áudios, pesquisar na web, gerar imagens, criar lembretes, agendar tarefas recorrentes, analisar documentos e vídeos do YouTube, e montar mapas com raio — tudo pelo WhatsApp.
 
 ## Missão e princípios
 
@@ -117,6 +117,14 @@ Aisha é uma assistente pessoal orientada a tarefas que roda no WhatsApp Busines
 - Funciona com artigos, notícias, blogs e documentações
 - Exemplos de uso: resumo, tradução, extração de dados, explicação simplificada, post para LinkedIn
 
+### Mapa com raio (círculo em torno de um ponto)
+- Informe um endereço e um raio; a Aisha envia um mapa Google (visual CalcMaps) com círculo azul e pino vermelho
+- Unidades: metros, km (padrão se você só mandar o número) ou milhas; faixa de 50 m a 50 km
+- Se o endereço for ambíguo, ela lista as opções. Follow-up ("agora com 5 km") reusa o último ponto
+- Não usa geração de imagem por IA — geocodifica no Nominatim e pede o PNG à Google Maps Static API
+- Requer `GOOGLE_MAPS_API_KEY`
+- Exemplos: "mapa de 2 km em torno da Av. Beira Mar 123, Fortaleza"
+
 ### Lembretes
 - Criação via linguagem natural em português
 - Aviso enviado por WhatsApp X minutos antes do evento (padrão: 15 min)
@@ -194,7 +202,7 @@ handle_chat (texto)
         ├── 2. saudação trivial? ──► gpt-5.6-luna (Fast mode, sem tools)
         └── 3. agente (gpt-5.6-sol, Fast mode)
                     └── loop de tools (até 10 iterações, em paralelo)
-                          ├── web_search / search_x / image_generation
+                          ├── web_search / search_x / image_generation / draw_radius_map
                           ├── lembretes e tarefas agendadas
                           ├── YouTube / webpage / download
                           └── memória (save / search / list / forget)
@@ -245,6 +253,7 @@ whatsapp-agent/
 | LLM refinamento | Google Gemini 3.6 Flash (fallback: 2.5 Flash) |
 | Transcrição | OpenAI Whisper (whisper-1) |
 | Geração/edição de imagem | image_generation (Responses API) |
+| Mapa com raio | Nominatim + Google Maps Static API (`draw_radius_map`) |
 | Busca na web | Ferramenta nativa da Responses API |
 | Busca no X (Twitter) | xAI Grok `x_search` via tool `search_x` |
 | Memória de longo prazo | Embeddings text-embedding-3-small + tabela memories |
@@ -372,6 +381,7 @@ USER_TIMEZONE=America/Sao_Paulo
 REMINDER_LEAD_MINUTES=15
 GEMINI_API_KEY=AIzaSy...
 XAI_API_KEY=xai-...
+GOOGLE_MAPS_API_KEY=AIzaSy...
 WHATSAPP_APP_SECRET=app_secret_da_meta
 ```
 
@@ -389,6 +399,7 @@ WHATSAPP_APP_SECRET=app_secret_da_meta
 | `REMINDER_LEAD_MINUTES` | Minutos de antecedência para o aviso do lembrete (padrão: `15`) |
 | `GEMINI_API_KEY` | API key do Google AI Studio para análise de vídeos YouTube (opcional) |
 | `XAI_API_KEY` | API key da xAI (console.x.ai) para buscar o que pessoas estão falando no X (opcional) |
+| `GOOGLE_MAPS_API_KEY` | Chave da Google Maps Static API para mapa com raio (opcional; sem ela a skill recusa) |
 | `WHATSAPP_APP_SECRET` | App Secret da Meta para validar `X-Hub-Signature-256`. Se vazio, a verificação é pulada. |
 | `PORT` | Porta do servidor (Railway injeta automaticamente; padrão: 8000) |
 

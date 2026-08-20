@@ -35,6 +35,7 @@ from aisha.tools.memory import (
     tool_forget_memory,
 )
 from aisha.tools.x_search import tool_search_x
+from aisha.tools.radius_map import tool_draw_radius_map
 
 log = logging.getLogger(__name__)
 
@@ -349,6 +350,55 @@ TOOL_DEFINITIONS: list[dict] = [
     },
     {
         "type": "function",
+        "name": "draw_radius_map",
+        "description": (
+            "Build a REAL geographic map (Google Maps Static API, CalcMaps-style) with a "
+            "geodesic circle around an address or coordinates. Use this whenever the user "
+            "wants a map with a radius, a circle around a point, coverage area, or 'mapa com raio'. "
+            "NEVER use image_generation for maps — generated images are not geographically accurate. "
+            "Do not call this if the address/point OR the radius is missing; ask one question first. "
+            "If the tool returns status=ambiguous, list the candidates and ask which one to use. "
+            "On status=ok the PNG is sent automatically to WhatsApp; reply with display_name, "
+            "lat/lng, radius_label, area_label and maps_url. If unit_assumed=km, mention that "
+            "the radius was interpreted in kilometers."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "address": {
+                    "type": "string",
+                    "description": (
+                        "Free-text address to geocode (street, neighborhood, city, CEP, landmark). "
+                        "Optional when latitude and longitude are provided (follow-up / chosen candidate)."
+                    ),
+                },
+                "latitude": {
+                    "type": "number",
+                    "description": "Latitude in decimal degrees. Use with longitude to skip geocoding.",
+                },
+                "longitude": {
+                    "type": "number",
+                    "description": "Longitude in decimal degrees. Use with latitude to skip geocoding.",
+                },
+                "radius": {
+                    "type": "number",
+                    "description": (
+                        "Radius magnitude. Combined with unit. "
+                        "If the user said '2 km', pass 2 and unit='km'."
+                    ),
+                },
+                "unit": {
+                    "type": "string",
+                    "enum": ["m", "km", "mi"],
+                    "description": "Radius unit. Default km when omitted.",
+                },
+            },
+            "required": ["radius"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
         "name": "set_personal_context",
         "description": (
             "Save personal context the user shares about themselves (name, job, preferences, "
@@ -483,6 +533,7 @@ _DISPATCH = {
     "read_webpage": tool_read_webpage,
     "search_x": tool_search_x,
     "download_video": tool_download_video,
+    "draw_radius_map": tool_draw_radius_map,
     "set_personal_context": tool_set_personal_context,
     "set_language": tool_set_language,
     "get_my_profile": tool_get_my_profile,

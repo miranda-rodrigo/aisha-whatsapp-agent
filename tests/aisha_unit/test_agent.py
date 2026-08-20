@@ -63,6 +63,14 @@ class ParseResponseTests(unittest.TestCase):
         self.assertEqual(agent._parse_response(response), (None, None))
 
 
+class SystemPromptTests(unittest.TestCase):
+    def test_maps_use_draw_radius_map_not_image_generation(self):
+        prompt = agent._build_system_prompt(None, "America/Sao_Paulo")
+        self.assertIn("draw_radius_map", prompt)
+        self.assertIn("NUNCA use image_generation para mapas", prompt)
+        self.assertIn("area_label", prompt)
+
+
 class AgentLoopTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.create = AsyncMock()
@@ -158,6 +166,39 @@ class AgentLoopTests(unittest.IsolatedAsyncioTestCase):
             ["get_weather"] * agent._MAX_ITERATIONS,
         )
         self.assertIsNone(result.text)
+
+    async def test_agent_attaches_radius_map_image_from_store(self):
+        self.create.side_effect = [
+            tool_response("step-1", "draw_radius_map"),
+            message_response("step-2", "mapa pronto"),
+        ]
+
+        with patch.object(
+            agent,
+            "execute_tool",
+            AsyncMock(return_value='{"status":"ok"}'),
+        ), patch(
+            "aisha.skills.radius_map.pop_map_image",
+            return_value=b"map-png",
+        ) as pop, patch(
+            "aisha.user_profile.get_profile",
+            AsyncMock(return_value=None),
+        ), patch(
+            "aisha.skills.reminder_store.get_reminders",
+            AsyncMock(return_value=[]),
+        ), patch(
+            "aisha.skills.memory_store.search_memories",
+            AsyncMock(return_value=[]),
+        ):
+            result = await agent.run_agent(
+                "mapa de 2 km em Fortaleza",
+                phone="5511",
+            )
+
+        pop.assert_called_once_with("5511")
+        self.assertEqual(result.image_bytes, b"map-png")
+        self.assertEqual(result.text, "mapa pronto")
+        self.assertEqual(result.tools_called, ["draw_radius_map"])
 
 
 if __name__ == "__main__":

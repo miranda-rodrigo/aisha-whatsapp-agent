@@ -77,7 +77,14 @@ def _build_system_prompt(
         "sentimento ou discussão na rede, use search_x — não web_search. "
         "Pode usar as duas se precisar de posts E notícias. "
         "No WhatsApp, entregue um briefing curto com links x.com simples (sem markdown [[1]]).",
-        "- Quando o usuário pedir para gerar ou editar uma imagem, use image_generation.",
+        "- Quando o usuário pedir para gerar ou editar uma imagem, use image_generation. "
+        "EXCEÇÃO: mapa, raio, círculo em torno de um ponto/endereço, área de cobertura → "
+        "use draw_radius_map. NUNCA use image_generation para mapas (o mapa precisa ser geográfico real).",
+        "- Mapa com raio: precisa de endereço (ou lat/lng) E raio. Se faltar um dos dois, "
+        "faça UMA pergunta objetiva e não chame a tool. Follow-up ('agora com 5 km') reusa o ponto.",
+        "- Se draw_radius_map devolver status=ambiguous, liste os candidatos e pergunte qual usar. "
+        "Se status=ok, o PNG já é enviado automaticamente — responda com endereço, coordenadas, "
+        "raio, area_label e maps_url. Se unit_assumed=km, diga que interpretou o raio em quilômetros.",
         "- Quando o usuário pedir um lembrete, verifique os LEMBRETES ATIVOS abaixo antes de agir:",
         "    * Se já existe um lembrete sobre o mesmo assunto/evento, use edit_reminder.",
         "    * Só use create_reminder se o lembrete é claramente novo.",
@@ -299,6 +306,11 @@ async def run_agent(
         }
 
     text, image_bytes = _parse_response(response)
+    if tools_called and "draw_radius_map" in tools_called:
+        from aisha.skills.radius_map import pop_map_image
+        map_png = pop_map_image(phone or "")
+        if map_png:
+            image_bytes = map_png
     result = AgentResult(
         text=text,
         image_bytes=image_bytes,
