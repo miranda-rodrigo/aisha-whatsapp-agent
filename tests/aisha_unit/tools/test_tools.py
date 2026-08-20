@@ -11,6 +11,7 @@ configure_test_env()
 
 from aisha import tools
 from aisha.tools import memory, profile, reminder, scheduled_task, video_download, webpage, youtube
+from aisha.tools import radius_map as radius_map_tool
 
 
 def decoded(value: str) -> dict:
@@ -87,6 +88,27 @@ class SimpleWrapperTests(ToolTestCase):
         self.assertEqual(result["download_link"], "https://aisha.test/download/token-1")
         self.assertEqual(result["filename"], "video.mp4")
         download.assert_awaited_once_with("https://youtu.be/abc")
+
+    async def test_draw_radius_map_delega(self):
+        with patch(
+            "aisha.skills.radius_map.build_radius_map",
+            AsyncMock(return_value={"status": "ok", "lat": -3.73}),
+        ) as build:
+            result = decoded(
+                await radius_map_tool.tool_draw_radius_map(
+                    {"address": "Fortaleza", "radius": 2, "unit": "km"},
+                    self.ctx,
+                )
+            )
+        self.assertEqual(result["status"], "ok")
+        build.assert_awaited_once_with(
+            phone=self.ctx.phone,
+            address="Fortaleza",
+            latitude=None,
+            longitude=None,
+            radius=2,
+            unit="km",
+        )
 
 
 class MemoryToolTests(ToolTestCase):
