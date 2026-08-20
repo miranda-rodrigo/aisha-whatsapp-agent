@@ -69,7 +69,6 @@ class SystemPromptTests(unittest.TestCase):
         self.assertIn("draw_radius_map", prompt)
         self.assertIn("NUNCA use image_generation para mapas", prompt)
         self.assertIn("area_label", prompt)
-        self.assertIn("temporariamente sem configuração", prompt)
 
 
 class AgentLoopTests(unittest.IsolatedAsyncioTestCase):

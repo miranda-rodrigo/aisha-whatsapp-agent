@@ -1,9 +1,7 @@
 """Mapa estático com círculo geodésico em torno de um endereço ou ponto.
 
-Geocodifica via Nominatim. Prefere Google Maps Static API (visual CalcMaps:
-roadmap, círculo azul, pino vermelho). Sem GOOGLE_MAPS_API_KEY — ou se o
-Google falhar — desenha o mesmo círculo sobre tiles OpenStreetMap. O PNG
-fica num store em memória por telefone — não vai no contexto do modelo.
+Geocodifica via Nominatim e desenha o raio sobre tiles OpenStreetMap.
+O PNG fica num store em memória por telefone — não vai no contexto do modelo.
 """
 
 from __future__ import annotations
@@ -11,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-import os
 import re
 import unicodedata
 from typing import Any
@@ -22,7 +19,6 @@ log = logging.getLogger(__name__)
 
 USER_AGENT = "Aisha/1.0 (contato@askaisha.com.br)"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-STATICMAP_URL = "https://maps.googleapis.com/maps/api/staticmap"
 TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 
 MIN_RADIUS_M = 50
@@ -38,11 +34,6 @@ MAX_ZOOM = 18
 EARTH_RADIUS_M = 6_371_000.0
 EARTH_CIRCUMFERENCE_M = 40_075_016.686
 MERCATOR_MAX_LAT = 85.05112878
-
-# CalcMaps-like overlay: blue fill ~33% opacity, darker blue stroke.
-PATH_FILL = "0x1E88E655"
-PATH_STROKE = "0x1565C0FF"
-PATH_WEIGHT = "2"
 
 _UNIT_TO_METERS = {
     "m": 1.0,
@@ -73,13 +64,6 @@ def store_map_image(phone: str, png: bytes) -> None:
 
 def pop_map_image(phone: str) -> bytes | None:
     return _last_maps.pop(phone, None)
-
-
-def maps_api_key() -> str:
-    return (
-        os.environ.get("GOOGLE_MAPS_API_KEY", "")
-        or os.environ.get("GOOGLE_MAPS_STATIC_API_KEY", "")
-    ).strip()
 
 
 def _strip_accents(text: str) -> str:
@@ -188,71 +172,6 @@ def choose_zoom(lat: float, radius_m: float) -> int:
     return max(MIN_ZOOM, min(MAX_ZOOM, int(round(zoom_f))))
 
 
-def encode_polyline(points: list[tuple[float, float]]) -> str:
-    """Encoded polyline algorithm da Google Maps Static API."""
-
-    def encode_signed(value: int) -> str:
-        value = ~(value << 1) if value < 0 else (value << 1)
-        chunks: list[str] = []
-        while value >= 0x20:
-            chunks.append(chr((0x20 | (value & 0x1F)) + 63))
-            value >>= 5
-        chunks.append(chr(value + 63))
-        return "".join(chunks)
-
-    parts: list[str] = []
-    prev_lat = 0
-    prev_lng = 0
-    for lat, lng in points:
-        lat_e5 = int(round(lat * 1e5))
-        lng_e5 = int(round(lng * 1e5))
-        parts.append(encode_signed(lat_e5 - prev_lat))
-        parts.append(encode_signed(lng_e5 - prev_lng))
-        prev_lat, prev_lng = lat_e5, lng_e5
-    return "".join(parts)
-
-
-def decode_polyline(encoded: str) -> list[tuple[float, float]]:
-    """Decodifica para testes: o círculo precisa fechar e ter o raio certo."""
-    points: list[tuple[float, float]] = []
-    index = 0
-    lat = 0
-    lng = 0
-    length = len(encoded)
-    while index < length:
-        result = 0
-        shift = 0
-        while True:
-            byte = ord(encoded[index]) - 63
-            index += 1
-            result |= (byte & 0x1F) << shift
-            shift += 5
-            if byte < 0x20:
-                break
-        lat += ~(result >> 1) if result & 1 else (result >> 1)
-        result = 0
-        shift = 0
-        while True:
-            byte = ord(encoded[index]) - 63
-            index += 1
-            result |= (byte & 0x1F) << shift
-            shift += 5
-            if byte < 0x20:
-                break
-        lng += ~(result >> 1) if result & 1 else (result >> 1)
-        points.append((lat / 1e5, lng / 1e5))
-    return points
-
-
-def closed_circle_path(lat: float, lng: float, radius_m: float) -> str:
-    pts = geodesic_circle(lat, lng, radius_m)
-    pts.append(pts[0])
-    return (
-        f"fillcolor:{PATH_FILL}|color:{PATH_STROKE}|weight:{PATH_WEIGHT}"
-        f"|enc:{encode_polyline(pts)}"
-    )
-
-
 def _as_float(value: Any) -> float | None:
     if value is None or value == "":
         return None
@@ -296,19 +215,6 @@ async def geocode_address(address: str, client: httpx.AsyncClient) -> dict:
     chosen = _candidate(results[0], 1)
     chosen["status"] = "ok"
     return chosen
-
-
-def static_map_params(lat: float, lng: float, radius_m: float, api_key: str) -> dict[str, str]:
-    return {
-        "size": "640x640",
-        "scale": "2",
-        "maptype": "roadmap",
-        "language": "pt-BR",
-        "region": "BR",
-        "markers": f"color:red|{lat:.6f},{lng:.6f}",
-        "path": closed_circle_path(lat, lng, radius_m),
-        "key": api_key,
-    }
 
 
 async def _fetch_tile(client: httpx.AsyncClient, z: int, x: int, y: int) -> tuple[tuple[int, int], bytes]:
@@ -448,44 +354,21 @@ async def render_osm_map(
     return _render_map_png(tiles, zoom, x_min, y_min, x_max, y_max, lat, lng, radius_m)
 
 
-async def render_google_static_map(
-    client: httpx.AsyncClient,
-    lat: float,
-    lng: float,
-    radius_m: float,
-    api_key: str,
-) -> bytes:
-    resp = await client.get(STATICMAP_URL, params=static_map_params(lat, lng, radius_m, api_key))
-    resp.raise_for_status()
-    content = resp.content or b""
-    stripped = content.lstrip()
-    if stripped.startswith(b"<") or stripped.startswith(b"{"):
-        raise RuntimeError(f"Google Static Maps recusou o pedido: {content[:200]!r}")
-    if not (content.startswith(b"\x89PNG") or content.startswith(b"GIF") or content.startswith(b"\xff\xd8")):
-        raise RuntimeError("Google Static Maps não devolveu uma imagem.")
-    return content
-
-
 async def render_radius_map(
     client: httpx.AsyncClient,
     lat: float,
     lng: float,
     radius_m: float,
-) -> tuple[bytes, str]:
-    """Devolve (png, source) com source='google' ou 'osm'."""
-    key = maps_api_key()
-    if key:
-        try:
-            return await render_google_static_map(client, lat, lng, radius_m, key), "google"
-        except Exception:
-            log.exception("Google Static Maps falhou; usando OpenStreetMap")
-    else:
-        log.info("GOOGLE_MAPS_API_KEY ausente; mapa com raio via OpenStreetMap")
-    return await render_osm_map(client, lat, lng, radius_m), "osm"
+) -> bytes:
+    return await render_osm_map(client, lat, lng, radius_m)
 
 
-def maps_url(lat: float, lng: float) -> str:
-    return f"https://www.google.com/maps?q={lat:.6f},{lng:.6f}"
+def maps_url(lat: float, lng: float, zoom: int | None = None) -> str:
+    z = zoom if zoom is not None else 15
+    return (
+        f"https://www.openstreetmap.org/?mlat={lat:.6f}&mlon={lng:.6f}"
+        f"#map={z}/{lat:.5f}/{lng:.5f}"
+    )
 
 
 def unit_was_assumed(value: Any, unit: str | None) -> bool:
@@ -528,15 +411,15 @@ async def build_radius_map(
                 lat = geo["lat"]
                 lng = geo["lng"]
                 display_name = geo["display_name"] or display_name
-            png, source = await render_radius_map(client, lat, lng, radius_m)
+            png = await render_radius_map(client, lat, lng, radius_m)
     except Exception:
         log.exception("Failed to build radius map")
         return {"error": "Não consegui montar o mapa agora. Tente de novo em instantes."}
 
     store_map_image(phone, png)
     log.info(
-        "Radius map ready: phone=%s lat=%.5f lng=%.5f r=%.0fm bytes=%s source=%s",
-        phone, lat, lng, radius_m, len(png), source,
+        "Radius map ready: phone=%s lat=%.5f lng=%.5f r=%.0fm bytes=%s",
+        phone, lat, lng, radius_m, len(png),
     )
     payload = {
         "status": "ok",
@@ -546,8 +429,7 @@ async def build_radius_map(
         "radius_m": int(round(radius_m)),
         "radius_label": format_radius(radius_m),
         "area_label": format_area(radius_m),
-        "maps_url": maps_url(lat, lng),
-        "source": source,
+        "maps_url": maps_url(lat, lng, choose_zoom(lat, radius_m)),
     }
     if assumed_km:
         payload["unit_assumed"] = "km"

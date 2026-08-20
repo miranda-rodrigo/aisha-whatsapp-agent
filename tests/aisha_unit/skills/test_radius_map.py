@@ -80,21 +80,6 @@ class GeometryTests(unittest.TestCase):
         self.assertAlmostEqual(d0, 2000, delta=10)
         self.assertAlmostEqual(dhalf, 2000, delta=10)
 
-    def test_polyline_closes_and_keeps_radius(self):
-        lat, lng, radius_m = -3.73, -38.52, 5000.0
-        path = radius_map.closed_circle_path(lat, lng, radius_m)
-        self.assertIn("enc:", path)
-        self.assertIn(f"fillcolor:{radius_map.PATH_FILL}", path)
-        encoded = path.split("enc:", 1)[1]
-        pts = radius_map.decode_polyline(encoded)
-        self.assertEqual(len(pts), radius_map.CIRCLE_POINTS + 1)
-        self.assertAlmostEqual(pts[0][0], pts[-1][0], places=4)
-        self.assertAlmostEqual(pts[0][1], pts[-1][1], places=4)
-        for point in pts[:-1]:
-            self.assertAlmostEqual(
-                radius_map.haversine_m(lat, lng, *point), radius_m, delta=20
-            )
-
     def test_world_pixels_increase_east_and_south(self):
         x0, y0 = radius_map.latlng_to_world_pixels(-3.73, -38.52, 14)
         xe, ye = radius_map.latlng_to_world_pixels(-3.73, -38.50, 14)
@@ -178,7 +163,7 @@ class BuildMapTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         with patch.object(radius_map.httpx, "AsyncClient", factory), patch.object(
-            radius_map, "render_radius_map", AsyncMock(return_value=(FAKE_PNG, "google"))
+            radius_map, "render_radius_map", AsyncMock(return_value=FAKE_PNG)
         ) as render:
             result = await radius_map.build_radius_map(
                 "5511", address="Beira Mar, Fortaleza", radius=2, unit="km"
@@ -189,8 +174,8 @@ class BuildMapTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["radius_m"], 2000)
         self.assertEqual(result["radius_label"], "2 km")
         self.assertEqual(result["area_label"], "12,57 km²")
-        self.assertIn("google.com/maps", result["maps_url"])
-        self.assertEqual(result["source"], "google")
+        self.assertIn("openstreetmap.org", result["maps_url"])
+        self.assertNotIn("source", result)
         self.assertEqual(radius_map.pop_map_image("5511"), FAKE_PNG)
         self.assertIsNone(radius_map.pop_map_image("5511"))
         render.assert_awaited_once()
@@ -199,7 +184,7 @@ class BuildMapTests(unittest.IsolatedAsyncioTestCase):
     async def test_coordinates_skip_geocode(self):
         factory, client = async_http_client()
         with patch.object(radius_map.httpx, "AsyncClient", factory), patch.object(
-            radius_map, "render_radius_map", AsyncMock(return_value=(FAKE_PNG, "google"))
+            radius_map, "render_radius_map", AsyncMock(return_value=FAKE_PNG)
         ):
             result = await radius_map.build_radius_map(
                 "5511", latitude=-3.73, longitude=-38.52, radius=500, unit="m"
@@ -211,59 +196,13 @@ class BuildMapTests(unittest.IsolatedAsyncioTestCase):
     async def test_assumes_km_when_unit_omitted(self):
         factory, _ = async_http_client()
         with patch.object(radius_map.httpx, "AsyncClient", factory), patch.object(
-            radius_map, "render_radius_map", AsyncMock(return_value=(FAKE_PNG, "osm"))
+            radius_map, "render_radius_map", AsyncMock(return_value=FAKE_PNG)
         ):
             result = await radius_map.build_radius_map(
                 "5511", latitude=-3.73, longitude=-38.52, radius=2
             )
         self.assertEqual(result["radius_m"], 2000)
         self.assertEqual(result["unit_assumed"], "km")
-        self.assertEqual(result["source"], "osm")
-
-
-class StaticMapTests(unittest.IsolatedAsyncioTestCase):
-    async def test_requests_google_static_map_without_center_or_zoom(self):
-        client = MagicMock()
-        client.get = AsyncMock(return_value=http_response(content=FAKE_PNG))
-        with patch.object(radius_map, "maps_api_key", return_value="test-key"):
-            png, source = await radius_map.render_radius_map(client, -3.73, -38.52, 5000)
-        self.assertEqual(png, FAKE_PNG)
-        self.assertEqual(source, "google")
-        url, kwargs = client.get.await_args.args[0], client.get.await_args.kwargs
-        self.assertEqual(url, radius_map.STATICMAP_URL)
-        params = kwargs["params"]
-        self.assertEqual(params["size"], "640x640")
-        self.assertEqual(params["scale"], "2")
-        self.assertEqual(params["maptype"], "roadmap")
-        self.assertEqual(params["markers"], "color:red|-3.730000,-38.520000")
-        self.assertIn("enc:", params["path"])
-        self.assertNotIn("center", params)
-        self.assertNotIn("zoom", params)
-        self.assertEqual(params["key"], "test-key")
-
-    async def test_missing_api_key_falls_back_to_osm(self):
-        client = MagicMock()
-        with patch.object(radius_map, "maps_api_key", return_value=""):
-            with patch.object(
-                radius_map, "render_osm_map", AsyncMock(return_value=FAKE_PNG)
-            ) as osm:
-                png, source = await radius_map.render_radius_map(client, -3.73, -38.52, 2000)
-        self.assertEqual(png, FAKE_PNG)
-        self.assertEqual(source, "osm")
-        osm.assert_awaited_once()
-        client.get.assert_not_called()
-
-    async def test_google_failure_falls_back_to_osm(self):
-        client = MagicMock()
-        client.get = AsyncMock(return_value=http_response(content=b'{"error":"denied"}'))
-        with patch.object(radius_map, "maps_api_key", return_value="test-key"):
-            with patch.object(
-                radius_map, "render_osm_map", AsyncMock(return_value=FAKE_PNG)
-            ) as osm:
-                png, source = await radius_map.render_radius_map(client, -3.73, -38.52, 5000)
-        self.assertEqual(png, FAKE_PNG)
-        self.assertEqual(source, "osm")
-        osm.assert_awaited_once()
 
 
 class OsmRenderTests(unittest.TestCase):
