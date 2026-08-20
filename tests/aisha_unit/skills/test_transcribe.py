@@ -10,6 +10,8 @@ if "openai" not in sys.modules:
     sys.modules["openai"] = ModuleType("openai")
 if not hasattr(sys.modules["openai"], "OpenAI"):
     sys.modules["openai"].OpenAI = MagicMock(return_value=MagicMock())
+if not hasattr(sys.modules["openai"], "AsyncOpenAI"):
+    sys.modules["openai"].AsyncOpenAI = MagicMock(return_value=MagicMock())
 
 from aisha.skills import transcribe
 
