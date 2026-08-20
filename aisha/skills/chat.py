@@ -27,7 +27,6 @@ from aisha.models import (
     AGENT_MODEL,
     DOCUMENT_MODEL,
     EXTRACT_MODEL,
-    FAST_MODEL,
     OPENAI_SERVICE_TIER,
 )
 from aisha.routing import wants_new_session as _wants_new_session
@@ -264,7 +263,7 @@ async def _chat_simple(
 ) -> ChatResult:
     """Handle simple messages with gpt-4.1 via Responses API."""
     kwargs: dict = {
-        "model": FAST_MODEL,
+        "model": AGENT_MODEL,
         "service_tier": OPENAI_SERVICE_TIER,
         "instructions": _build_instructions(SYSTEM_PROMPT, profile),
         "input": user_input,
@@ -371,7 +370,7 @@ async def _chat_self(
         input_text = f"{user_input}\n\n---\n{extra_user_data}"
 
     kwargs: dict = {
-        "model": FAST_MODEL,
+        "model": AGENT_MODEL,
         "service_tier": OPENAI_SERVICE_TIER,
         "instructions": instructions,
         "input": input_text,

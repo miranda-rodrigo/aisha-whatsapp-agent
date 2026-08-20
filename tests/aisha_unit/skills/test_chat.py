@@ -79,7 +79,7 @@ class ChatAsyncTests(unittest.IsolatedAsyncioTestCase):
             result = await chat._chat_simple("oi", "resp-anterior", {"language": "português"})
         self.assertEqual(result, chat.ChatResult(text="Tudo bem", response_id="resp-1"))
         self.assertEqual(create.await_args.kwargs["previous_response_id"], "resp-anterior")
-        self.assertEqual(create.await_args.kwargs["model"], chat.FAST_MODEL)
+        self.assertEqual(create.await_args.kwargs["model"], "gpt-5.6-sol")
         self.assertEqual(create.await_args.kwargs["service_tier"], "fast")
 
     async def test_chat_complex_extrai_texto_e_imagem(self):
