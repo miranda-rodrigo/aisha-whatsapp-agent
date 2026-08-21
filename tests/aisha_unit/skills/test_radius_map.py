@@ -43,6 +43,39 @@ class ParseRadiusTests(unittest.TestCase):
         self.assertEqual(radius_map.parse_radius_meters(500, "m"), 500)
         self.assertEqual(radius_map.parse_radius_meters(2, "km"), 2000)
 
+    def test_extract_radius_from_sentence(self):
+        self.assertEqual(
+            radius_map.extract_radius_from_text("faça um raio de 2 km"),
+            ("2", "km"),
+        )
+        self.assertEqual(
+            radius_map.extract_radius_from_text("agora com 500 metros"),
+            ("500", "metros"),
+        )
+        self.assertEqual(radius_map.extract_radius_from_text("2"), ("2", None))
+        self.assertEqual(
+            radius_map.extract_radius_from_text("raio de 2"),
+            ("2", None),
+        )
+        self.assertIsNone(radius_map.extract_radius_from_text("faça um raio de"))
+        self.assertIsNone(radius_map.extract_radius_from_text("me lembra amanhã às 10"))
+
+    def test_format_map_caption(self):
+        caption = radius_map.format_map_caption(
+            {
+                "display_name": "Assahi Motel",
+                "lat": -3.73,
+                "lng": -38.52,
+                "radius_label": "2 km",
+                "area_label": "12,57 km²",
+                "maps_url": "https://www.openstreetmap.org/",
+                "unit_assumed": "km",
+            }
+        )
+        self.assertIn("Assahi Motel", caption)
+        self.assertIn("2 km", caption)
+        self.assertIn("quilômetros", caption)
+
     def test_invalid(self):
         with self.assertRaises(ValueError):
             radius_map.parse_radius_meters(None)
@@ -187,11 +220,31 @@ class BuildMapTests(unittest.IsolatedAsyncioTestCase):
             radius_map, "render_radius_map", AsyncMock(return_value=FAKE_PNG)
         ):
             result = await radius_map.build_radius_map(
-                "5511", latitude=-3.73, longitude=-38.52, radius=500, unit="m"
+                "5511",
+                address="Assahi Motel",
+                latitude=-3.73,
+                longitude=-38.52,
+                radius=500,
+                unit="m",
             )
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["lat"], -3.73)
+        self.assertEqual(result["display_name"], "Assahi Motel")
         client.get.assert_not_called()
+
+    async def test_coordinates_without_name_reverse_geocode(self):
+        factory, client = async_http_client(
+            http_response(json_data={"display_name": "Rua A, Fortaleza"})
+        )
+        with patch.object(radius_map.httpx, "AsyncClient", factory), patch.object(
+            radius_map, "render_radius_map", AsyncMock(return_value=FAKE_PNG)
+        ):
+            result = await radius_map.build_radius_map(
+                "5511", latitude=-3.73, longitude=-38.52, radius=500, unit="m"
+            )
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["display_name"], "Rua A, Fortaleza")
+        self.assertEqual(client.get.await_count, 1)
 
     async def test_assumes_km_when_unit_omitted(self):
         factory, _ = async_http_client()
@@ -199,7 +252,7 @@ class BuildMapTests(unittest.IsolatedAsyncioTestCase):
             radius_map, "render_radius_map", AsyncMock(return_value=FAKE_PNG)
         ):
             result = await radius_map.build_radius_map(
-                "5511", latitude=-3.73, longitude=-38.52, radius=2
+                "5511", latitude=-3.73, longitude=-38.52, radius=2, address="Fortaleza"
             )
         self.assertEqual(result["radius_m"], 2000)
         self.assertEqual(result["unit_assumed"], "km")

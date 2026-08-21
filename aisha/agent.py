@@ -81,7 +81,10 @@ def _build_system_prompt(
         "EXCEÇÃO: mapa, raio, círculo em torno de um ponto/endereço, área de cobertura → "
         "use draw_radius_map. NUNCA use image_generation para mapas (o mapa precisa ser geográfico real).",
         "- Mapa com raio: precisa de endereço (ou lat/lng) E raio. Se faltar um dos dois, "
-        "faça UMA pergunta objetiva e não chame a tool. Follow-up ('agora com 5 km') reusa o ponto.",
+        "faça UMA pergunta objetiva e não chame a tool. Follow-up ('agora com 5 km') reusa o ponto. "
+        "Pin de localização do WhatsApp já traz latitude/longitude: use esses números, "
+        "não peça o endereço de novo. Se o raio já foi pedido nesta conversa, chame "
+        "draw_radius_map agora; se faltar só o raio, pergunte só o raio (ex: 500 m, 2 km).",
         "- Se draw_radius_map devolver status=ambiguous, liste os candidatos e pergunte qual usar. "
         "Se status=ok, o PNG já é enviado automaticamente — responda com endereço, coordenadas, "
         "raio, area_label e maps_url. Se unit_assumed=km, diga que interpretou o raio em quilômetros.",

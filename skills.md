@@ -502,7 +502,7 @@ A Aisha escolhe automaticamente o melhor modelo para cada tarefa — você não 
 
 ## 15. Mapa com raio (círculo em torno de um ponto)
 
-A Aisha monta um **mapa real** (OpenStreetMap) com um círculo azul do raio que você pedir, centrado no endereço.
+A Aisha monta um **mapa real** (OpenStreetMap) com um círculo azul do raio que você pedir, centrado num endereço **ou no pin de localização do WhatsApp**.
 
 ### Como usar
 
@@ -510,6 +510,25 @@ A Aisha monta um **mapa real** (OpenStreetMap) com um círculo azul do raio que 
 "mapa de 2 km em torno da Av. Beira Mar 123, Fortaleza"
 "desenha um círculo de 500 metros em torno do Shopping Benfica"
 "raio de 5 km a partir da Praça do Ferreira"
+```
+
+### Localização do WhatsApp
+
+Envie o pin e depois o raio — nesta ordem ou na inversa:
+
+```
+Você: [pin de localização]
+Aisha: 📍 Recebi sua localização. Qual raio você quer em torno deste ponto?
+
+Você: faça um raio de 2 km
+Aisha: [imagem do mapa + endereço, raio, área e link OSM]
+```
+
+```
+Você: mapa de 500 m daqui
+Aisha: me envia a localização
+Você: [pin]
+Aisha: [imagem do mapa]
 ```
 
 **Resposta da Aisha:**
@@ -525,8 +544,9 @@ A Aisha monta um **mapa real** (OpenStreetMap) com um círculo azul do raio que 
 
 - O raio precisa estar entre **50 m e 50 km**
 - Se o endereço for ambíguo, ela lista as opções e pergunta qual usar
-- Se faltar o endereço ou o raio, ela pergunta o que falta
+- Se faltar o endereço/pin ou o raio, ela pergunta o que falta
 - Follow-up funciona: *"agora com 5 km"* reusa o último ponto
+- O pin de localização expira após **10 minutos** sem o raio
 - Isso **não** é uma imagem gerada por IA — o mapa vem de tiles OpenStreetMap
 
 ---

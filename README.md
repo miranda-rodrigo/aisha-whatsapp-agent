@@ -118,11 +118,12 @@ Aisha é uma assistente pessoal orientada a tarefas que roda no WhatsApp Busines
 - Exemplos de uso: resumo, tradução, extração de dados, explicação simplificada, post para LinkedIn
 
 ### Mapa com raio (círculo em torno de um ponto)
-- Informe um endereço e um raio; a Aisha envia um mapa OpenStreetMap com círculo azul e pino vermelho
+- Informe um endereço **ou envie um pin de localização do WhatsApp** e um raio; a Aisha envia um mapa OpenStreetMap com círculo azul e pino vermelho
 - Unidades: metros, km (padrão se você só mandar o número) ou milhas; faixa de 50 m a 50 km
 - Se o endereço for ambíguo, ela lista as opções. Follow-up ("agora com 5 km") reusa o último ponto
+- Pin primeiro, raio depois — ou o contrário. O pin fica pendente por 10 minutos
 - Não usa geração de imagem por IA — geocodifica no Nominatim e desenha o círculo sobre tiles OSM
-- Exemplos: "mapa de 2 km em torno da Av. Beira Mar 123, Fortaleza"
+- Exemplos: "mapa de 2 km em torno da Av. Beira Mar 123, Fortaleza"; `[pin]` + "faça um raio de 500 m"
 
 ### Lembretes
 - Criação via linguagem natural em português
@@ -187,6 +188,8 @@ Mensagem WhatsApp
         │
         ├── Imagem ──┬── com legenda ──► Processa imagem com legenda como instrução
         │            └── sem legenda ──► Armazena imagem + pergunta o que fazer
+        │
+        ├── Localização ──► Guarda lat/lng + pede o raio (ou desenha se o raio já foi pedido)
         │
         └── Documento ──► Detecta tipo
                               ├── PDF nativo ──► pymupdf4llm ──► gpt-4.1 resume/responde

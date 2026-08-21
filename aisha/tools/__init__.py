@@ -356,6 +356,7 @@ TOOL_DEFINITIONS: list[dict] = [
             "an address or coordinates. Use this whenever the user wants a map with a radius, "
             "a circle around a point, coverage area, or 'mapa com raio'. "
             "NEVER use image_generation for maps — generated images are not geographically accurate. "
+            "WhatsApp location pins already include latitude/longitude — pass those and skip geocoding. "
             "Do not call this if the address/point OR the radius is missing; ask one question first. "
             "If the tool returns status=ambiguous, list the candidates and ask which one to use. "
             "On status=ok the PNG is sent automatically to WhatsApp; reply with display_name, "
@@ -369,16 +370,23 @@ TOOL_DEFINITIONS: list[dict] = [
                     "type": "string",
                     "description": (
                         "Free-text address to geocode (street, neighborhood, city, CEP, landmark). "
-                        "Optional when latitude and longitude are provided (follow-up / chosen candidate)."
+                        "Optional when latitude and longitude are provided (WhatsApp pin, follow-up, "
+                        "or chosen candidate)."
                     ),
                 },
                 "latitude": {
                     "type": "number",
-                    "description": "Latitude in decimal degrees. Use with longitude to skip geocoding.",
+                    "description": (
+                        "Latitude in decimal degrees. Use with longitude to skip geocoding. "
+                        "Required when the user shared a WhatsApp location pin."
+                    ),
                 },
                 "longitude": {
                     "type": "number",
-                    "description": "Longitude in decimal degrees. Use with latitude to skip geocoding.",
+                    "description": (
+                        "Longitude in decimal degrees. Use with latitude to skip geocoding. "
+                        "Required when the user shared a WhatsApp location pin."
+                    ),
                 },
                 "radius": {
                     "type": "number",
