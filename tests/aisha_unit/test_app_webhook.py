@@ -111,7 +111,7 @@ class WebhookSecurityTests(unittest.IsolatedAsyncioTestCase):
             await app._process_webhook(body)
             await app._process_webhook(body)
 
-        handle_chat.assert_awaited_once_with("5511999999999", "olá")
+        handle_chat.assert_awaited_once_with("5511999999999", "olá", "wamid.1")
 
     async def test_process_webhook_ignores_own_or_disallowed_sender(self):
         own = webhook_body(sender="5511000000000", msg_id="own")
@@ -139,6 +139,48 @@ class WebhookSecurityTests(unittest.IsolatedAsyncioTestCase):
             "5511999999999",
             "Tipo 'sticker' ainda não suportado.",
         )
+
+    async def test_process_webhook_routes_location(self):
+        body = {
+            "entry": [
+                {
+                    "changes": [
+                        {
+                            "value": {
+                                "metadata": {"display_phone_number": "5511000000000"},
+                                "contacts": [{"wa_id": "5511999999999"}],
+                                "messages": [
+                                    {
+                                        "from": "5511999999999",
+                                        "id": "wamid.loc",
+                                        "type": "location",
+                                        "location": {
+                                            "latitude": -3.7319,
+                                            "longitude": -38.5267,
+                                            "name": "Assahi Motel",
+                                            "address": "Avenida Luciano Carneiro, 605",
+                                        },
+                                    }
+                                ],
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+
+        with (
+            patch.object(app, "ALLOWED_NUMBERS", {"5511999999999"}),
+            patch.object(app, "handle_location", AsyncMock()) as handle_location,
+            patch.object(app, "send_message", AsyncMock()) as send,
+        ):
+            await app._process_webhook(body)
+
+        handle_location.assert_awaited_once()
+        send.assert_not_awaited()
+        message = handle_location.await_args.args[1]
+        self.assertEqual(message["type"], "location")
+        self.assertEqual(message["location"]["name"], "Assahi Motel")
 
     async def test_send_message_posts_each_chunk_and_tracks_reply_time(self):
         client = MagicMock()

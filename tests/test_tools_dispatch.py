@@ -40,6 +40,10 @@ class ToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         ):
             self.assertIn(required, names)
 
+    def test_draw_radius_map_mentions_whatsapp_pin(self):
+        tool = next(t for t in TOOL_DEFINITIONS if t.get("name") == "draw_radius_map")
+        self.assertIn("WhatsApp location pins", tool["description"])
+
 
 if __name__ == "__main__":
     unittest.main()

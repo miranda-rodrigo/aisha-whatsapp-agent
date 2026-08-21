@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 
 USER_AGENT = "Aisha/1.0 (contato@askaisha.com.br)"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
 TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 
 MIN_RADIUS_M = 50
@@ -79,6 +80,38 @@ def _parse_number(raw: str) -> float:
     return float(text)
 
 
+_RADIUS_UNIT_RE = (
+    r"km|quilometros?|kilometros?|kilometers?|"
+    r"metros?|meters?|mi|milhas?|miles?|m"
+)
+
+
+def extract_radius_from_text(text: str) -> tuple[str, str | None] | None:
+    """Extrai (valor, unidade) de uma frase. None se não houver raio."""
+    if text is None:
+        return None
+    raw = str(text).strip()
+    if not raw:
+        return None
+    try:
+        parse_radius_meters(raw)
+        return raw, None
+    except ValueError:
+        pass
+    folded = _strip_accents(raw)
+    match = re.search(
+        rf"([\d.,]+)\s*({_RADIUS_UNIT_RE})\b",
+        folded,
+        re.IGNORECASE,
+    )
+    if match:
+        return match.group(1), match.group(2)
+    match = re.search(r"\braio\b[^\d]{0,24}([\d.,]+)\b", folded, re.IGNORECASE)
+    if match:
+        return match.group(1), None
+    return None
+
+
 def parse_radius_meters(value: Any, unit: str | None = None) -> float:
     """Converte raio para metros. Sem unidade, assume km."""
     if value is None or value == "":
@@ -127,6 +160,29 @@ def format_area(radius_m: float) -> str:
         km2 = area_m2 / 1_000_000
         return f"{km2:.2f} km²".replace(".", ",")
     return f"{int(round(area_m2))} m²"
+
+
+def format_map_caption(payload: dict) -> str:
+    """Texto curto para acompanhar o PNG do mapa no WhatsApp."""
+    name = (payload.get("display_name") or "").strip()
+    radius_label = payload.get("radius_label") or ""
+    area_label = payload.get("area_label") or ""
+    lat = payload.get("lat")
+    lng = payload.get("lng")
+    maps_url = payload.get("maps_url") or ""
+    lines: list[str] = []
+    if name:
+        lines.append(f"📍 {name}")
+    if radius_label:
+        extra = f" (área {area_label})" if area_label else ""
+        lines.append(f"Raio: {radius_label}{extra}")
+    if lat is not None and lng is not None:
+        lines.append(f"Coordenadas: {lat}, {lng}")
+    if maps_url:
+        lines.append(maps_url)
+    if payload.get("unit_assumed") == "km":
+        lines.append("Interpretei o raio em quilômetros.")
+    return "\n".join(lines)
 
 
 def haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -215,6 +271,21 @@ async def geocode_address(address: str, client: httpx.AsyncClient) -> dict:
     chosen = _candidate(results[0], 1)
     chosen["status"] = "ok"
     return chosen
+
+
+async def reverse_geocode(lat: float, lng: float, client: httpx.AsyncClient) -> str | None:
+    try:
+        resp = await client.get(
+            NOMINATIM_REVERSE_URL,
+            params={"lat": lat, "lon": lng, "format": "json"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        log.exception("Reverse geocode failed for %s,%s", lat, lng)
+        return None
+    name = (data.get("display_name") or "").strip()
+    return name or None
 
 
 async def _fetch_tile(client: httpx.AsyncClient, z: int, x: int, y: int) -> tuple[tuple[int, int], bytes]:
@@ -411,6 +482,8 @@ async def build_radius_map(
                 lat = geo["lat"]
                 lng = geo["lng"]
                 display_name = geo["display_name"] or display_name
+            elif not display_name:
+                display_name = await reverse_geocode(lat, lng, client) or f"{lat:.5f}, {lng:.5f}"
             png = await render_radius_map(client, lat, lng, radius_m)
     except Exception:
         log.exception("Failed to build radius map")

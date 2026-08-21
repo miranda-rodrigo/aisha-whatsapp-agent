@@ -70,6 +70,23 @@ from aisha.skills.image_state import (
     mark_pending_image_meta,
     store_pending_image,
 )
+from aisha.skills.location_state import (
+    clear_pending_location,
+    format_location_for_agent,
+    format_location_received_prompt,
+    get_pending_location,
+    parse_whatsapp_location,
+    restore_pending_location,
+    store_pending_location,
+)
+from aisha.skills.radius_map import (
+    build_radius_map,
+    extract_radius_from_text,
+    format_map_caption,
+    parse_radius_meters,
+    pop_map_image,
+    validate_radius_m,
+)
 from aisha.skills.refine import refine_transcription
 from aisha.skills.raw_transcription_state import (
     pop_raw_transcription,
@@ -360,6 +377,8 @@ async def _process_webhook(body: dict) -> None:
             await handle_image(sender, message)
         elif msg_type == "document":
             await handle_document(sender, message)
+        elif msg_type == "location":
+            await handle_location(sender, message)
         else:
             await send_message(sender, f"Tipo '{msg_type}' ainda não suportado.")
     except Exception:
@@ -451,6 +470,12 @@ def _get_pending_description(sender: str) -> str | None:
     pending_page = get_pending_page(sender)
     if pending_page:
         return f"Aguardando instrução sobre a página web: {pending_page.url}"
+    pending_loc = get_pending_location(sender)
+    if pending_loc:
+        return (
+            "Aguardando o raio em torno da localização enviada: "
+            f"{pending_loc.label}"
+        )
     return None
 
 
@@ -461,6 +486,7 @@ def _clear_all_pendings(sender: str) -> None:
     clear_pending_video(sender)
     clear_pending_page(sender)
     clear_pending_document(sender)
+    clear_pending_location(sender)
     _spawn(clear_all_pending(sender))
 
 
@@ -553,6 +579,12 @@ async def _execute_pending(sender: str, text: str) -> bool:
             await send_message(sender, f"Não consegui acessar a página: {e}")
         return True
 
+    pending_loc = get_pending_location(sender)
+    if pending_loc:
+        log.info(f"Pending location for {sender} — treating text as radius: {text[:60]}")
+        await _draw_map_from_pending_location(sender, text, pending_loc)
+        return True
+
     return False
 
 
@@ -568,6 +600,7 @@ async def _hydrate_pendings(sender: str) -> None:
         or get_pending_document(sender)
         or get_pending_video(sender)
         or get_pending_page(sender)
+        or get_pending_location(sender)
     ):
         return
 
@@ -593,6 +626,8 @@ async def _hydrate_pendings(sender: str) -> None:
             if url:
                 from aisha.skills.webpage import store_pending_page
                 store_pending_page(sender, url, persist=False)
+        elif kind == "location":
+            restore_pending_location(sender, payload)
 
 
 async def handle_chat(sender: str, text: str, msg_id: str = ""):
@@ -643,6 +678,11 @@ async def handle_chat(sender: str, text: str, msg_id: str = ""):
                 await ack_task
             except Exception:
                 log.warning("Failed to send processing ack", exc_info=True)
+        pending_loc = get_pending_location(sender)
+        if pending_loc and extract_radius_from_text(text):
+            log.info(f"Pending location for {sender} — radius in follow-up: {text[:60]}")
+            await _draw_map_from_pending_location(sender, text, pending_loc)
+            return
         pending_desc = _get_pending_description(sender)
         if pending_desc:
             decision = await classify_pending_response(text, pending_desc)
@@ -721,10 +761,11 @@ async def handle_audio(sender: str, message: dict):
 
     Routing rules:
     1. Pending image → use audio as instruction (unchanged).
-    2. Explicit transcription request ("Aisha, transcreva...") → refine and return.
-    3. New session (no active context) AND no 'Aisha' keyword → user wants a transcript.
-    4. Active session AND no 'Aisha' keyword → route to chat (person is talking TO Aisha).
-    5. 'Aisha' keyword present but not a transcription request → strip name and chat.
+    2. Pending location with a parseable radius → draw the map.
+    3. Explicit transcription request ("Aisha, transcreva...") → refine and return.
+    4. New session (no active context) AND no 'Aisha' keyword → user wants a transcript.
+    5. Active session AND no 'Aisha' keyword → route to chat (person is talking TO Aisha).
+    6. 'Aisha' keyword present but not a transcription request → strip name and chat.
     """
     audio_id = message["audio"]["id"]
     log.info(f"Downloading audio {audio_id}")
@@ -753,7 +794,14 @@ async def handle_audio(sender: str, message: dict):
             await _process_image_instruction(sender, raw_text, pending)
             return
 
-        # Rule 2: explicit transcription request ("Aisha, transcreva ...")
+        # Rule 2: pending location with a parseable radius
+        pending_loc = get_pending_location(sender)
+        if pending_loc and extract_radius_from_text(raw_text):
+            log.info(f"Pending location for {sender} — using audio as radius")
+            await _draw_map_from_pending_location(sender, raw_text, pending_loc)
+            return
+
+        # Rule 3: explicit transcription request ("Aisha, transcreva ...")
         if _is_transcription_request(raw_text):
             log.info("Explicit transcription request detected — refining")
             user_text = re.sub(
@@ -769,7 +817,7 @@ async def handle_audio(sender: str, message: dict):
 
         has_aisha = _contains_aisha(raw_text)
 
-        # Rule 3: new session AND no 'Aisha' → person wants a transcript
+        # Rule 4: new session AND no 'Aisha' → person wants a transcript
         prev_id = await get_response_id(sender)
         is_new_session = prev_id is None
 
@@ -779,7 +827,7 @@ async def handle_audio(sender: str, message: dict):
             await _send_refined_transcription(sender, raw_text)
             return
 
-        # Rule 4 & 5: active session OR has 'Aisha' → chat
+        # Rule 5 & 6: active session OR has 'Aisha' → chat
         user_input = _strip_aisha(raw_text) if has_aisha else raw_text
         log.info(f"Routing to chat (new_session={is_new_session}, has_aisha={has_aisha})")
         store_raw_transcription(sender, raw_text)
@@ -922,6 +970,101 @@ async def handle_document(sender: str, message: dict):
         await send_message(sender, f"Erro ao processar documento: {e}")
 
 
+async def handle_location(sender: str, message: dict):
+    """Accepts a WhatsApp location pin and either draws a map or asks for the radius."""
+    loc = parse_whatsapp_location(message)
+    if loc is None:
+        await send_message(
+            sender,
+            "Não consegui ler essa localização. Envie o pin de novo.",
+        )
+        return
+
+    if sender in _processing:
+        log.info(f"User {sender} sent location while agent is busy")
+        await send_message(
+            sender,
+            "⏳ Ainda estou processando sua mensagem anterior. Aguarde um momento, por favor!",
+        )
+        return
+
+    store_pending_location(
+        sender,
+        lat=loc.lat,
+        lng=loc.lng,
+        name=loc.name,
+        address=loc.address,
+        url=loc.url,
+    )
+    log.info(
+        "Location from %s: lat=%.5f lng=%.5f name=%s",
+        sender, loc.lat, loc.lng, loc.name or loc.address or "",
+    )
+
+    prev_id = await get_response_id(sender)
+    if not prev_id:
+        await send_message(sender, format_location_received_prompt(loc))
+        return
+
+    from aisha.agent import run_agent
+
+    _processing.add(sender)
+    try:
+        result = await run_agent(
+            user_input=format_location_for_agent(loc),
+            previous_response_id=prev_id,
+            phone=sender,
+            scheduler=scheduler,
+        )
+        await _deliver_agent_result(sender, result)
+        if not (result.image_bytes and result.tools_called and "draw_radius_map" in result.tools_called):
+            if get_pending_location(sender) and not result.text:
+                await send_message(sender, format_location_received_prompt(loc))
+    except Exception:
+        log.exception("Location agent failed")
+        await send_message(sender, format_location_received_prompt(loc))
+    finally:
+        _processing.discard(sender)
+
+
+async def _draw_map_from_pending_location(sender: str, text: str, pending) -> None:
+    """Parse a radius from the follow-up and draw the map around the stored pin."""
+    extracted = extract_radius_from_text(text)
+    if not extracted:
+        await send_message(
+            sender,
+            "Não entendi o raio. Exemplos: *500 m*, *2 km*.",
+        )
+        return
+    value, unit = extracted
+    try:
+        validate_radius_m(parse_radius_meters(value, unit))
+    except ValueError as exc:
+        await send_message(sender, str(exc))
+        return
+
+    await send_message(sender, "⏳ Montando o mapa...")
+    result = await build_radius_map(
+        phone=sender,
+        address=(pending.label if (pending.name or pending.address) else None),
+        latitude=pending.lat,
+        longitude=pending.lng,
+        radius=value,
+        unit=unit,
+    )
+    if result.get("error"):
+        await send_message(sender, result["error"])
+        return
+    png = pop_map_image(sender)
+    clear_pending_location(sender)
+    if png:
+        await send_image(sender, png)
+    caption = format_map_caption(result)
+    if caption:
+        await send_message(sender, caption)
+    await increment_stat(sender, "tool_draw_radius_map")
+
+
 async def _deliver_agent_result(sender: str, result) -> None:
     if result.response_id:
         await upsert_session(sender, result.response_id)
@@ -937,6 +1080,8 @@ async def _deliver_agent_result(sender: str, result) -> None:
             pending = pop_pending_transcript(sender)
             if pending:
                 await _send_analysis_document(sender, pending)
+        if "draw_radius_map" in result.tools_called and result.image_bytes:
+            clear_pending_location(sender)
 
 
 async def _deliver_video_analysis(sender: str, analysis: VideoAnalysis) -> None:

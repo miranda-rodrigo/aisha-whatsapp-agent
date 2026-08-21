@@ -9,6 +9,7 @@ from tests.aisha_unit._helpers import http_response, namespace
 import aisha.app as app
 import aisha.skills.document_state as document_state
 import aisha.skills.image_state as image_state
+import aisha.skills.location_state as location_state
 import aisha.skills.webpage as webpage
 import aisha.skills.youtube as youtube
 
@@ -30,6 +31,7 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
         document_state._pending.clear()
         youtube._pending.clear()
         webpage._pending.clear()
+        location_state._pending.clear()
 
     async def test_handle_chat_respects_per_user_lock(self):
         app._processing.add("5511")
@@ -301,6 +303,173 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
         )
         deliver.assert_awaited_once_with("5511", result)
         self.assertNotIn("5511", app._processing)
+
+    async def test_handle_location_asks_for_radius_without_session(self):
+        message = {
+            "type": "location",
+            "location": {
+                "latitude": -3.7319,
+                "longitude": -38.5267,
+                "name": "Assahi Motel",
+                "address": "Avenida Luciano Carneiro, 605",
+            },
+        }
+
+        with (
+            patch.object(location_state, "_schedule", side_effect=lambda coro: coro.close()),
+            patch.object(app, "get_response_id", AsyncMock(return_value=None)),
+            patch.object(app, "send_message", AsyncMock()) as send,
+            patch("aisha.agent.run_agent", AsyncMock()) as run_agent,
+        ):
+            await app.handle_location("5511", message)
+
+        run_agent.assert_not_awaited()
+        self.assertIn("Qual raio", send.await_args.args[1])
+        self.assertIn("Assahi Motel", send.await_args.args[1])
+        pending = location_state.get_pending_location("5511")
+        self.assertIsNotNone(pending)
+        self.assertAlmostEqual(pending.lat, -3.7319)
+
+    async def test_handle_location_rejects_invalid_pin(self):
+        with patch.object(app, "send_message", AsyncMock()) as send:
+            await app.handle_location("5511", {"type": "location", "location": {}})
+
+        self.assertIn("Não consegui ler", send.await_args.args[1])
+        self.assertIsNone(location_state.get_pending_location("5511"))
+
+    async def test_handle_location_respects_busy_lock(self):
+        app._processing.add("5511")
+        message = {
+            "location": {"latitude": -3.73, "longitude": -38.52},
+        }
+        with patch.object(app, "send_message", AsyncMock()) as send:
+            await app.handle_location("5511", message)
+
+        self.assertIn("Ainda estou processando", send.await_args.args[1])
+        self.assertIsNone(location_state.get_pending_location("5511"))
+
+    async def test_handle_location_with_session_runs_agent(self):
+        message = {"location": {"latitude": -3.73, "longitude": -38.52, "name": "Centro"}}
+        result = SimpleNamespace(
+            response_id="resp-loc",
+            image_bytes=b"png",
+            text="mapa",
+            tools_called=["draw_radius_map"],
+        )
+        scheduler = object()
+
+        with (
+            patch.object(location_state, "_schedule", side_effect=lambda coro: coro.close()),
+            patch.object(app, "scheduler", scheduler, create=True),
+            patch.object(app, "get_response_id", AsyncMock(return_value="previous")),
+            patch("aisha.agent.run_agent", AsyncMock(return_value=result)) as run_agent,
+            patch.object(app, "_deliver_agent_result", AsyncMock()) as deliver,
+        ):
+            await app.handle_location("5511", message)
+
+        self.assertIn("latitude: -3.730000", run_agent.await_args.kwargs["user_input"])
+        self.assertEqual(run_agent.await_args.kwargs["previous_response_id"], "previous")
+        deliver.assert_awaited_once_with("5511", result)
+        self.assertNotIn("5511", app._processing)
+
+    async def test_draw_map_from_pending_location_sends_image(self):
+        pending = location_state.PendingLocation(
+            lat=-3.7319,
+            lng=-38.5267,
+            name="Assahi Motel",
+            address="Av. Luciano Carneiro, 605",
+            timestamp=0,
+        )
+        payload = {
+            "status": "ok",
+            "display_name": "Assahi Motel, Av. Luciano Carneiro, 605",
+            "lat": -3.7319,
+            "lng": -38.5267,
+            "radius_label": "2 km",
+            "area_label": "12,57 km²",
+            "maps_url": "https://www.openstreetmap.org/",
+        }
+
+        with (
+            patch.object(location_state, "_schedule", side_effect=lambda coro: coro.close()),
+            patch.object(
+                app,
+                "build_radius_map",
+                AsyncMock(return_value=payload),
+            ) as build,
+            patch.object(app, "pop_map_image", return_value=b"png-bytes"),
+            patch.object(app, "send_image", AsyncMock()) as send_image,
+            patch.object(app, "send_message", AsyncMock()) as send,
+            patch.object(app, "increment_stat", AsyncMock()) as increment,
+        ):
+            location_state._pending["5511"] = pending
+            await app._draw_map_from_pending_location(
+                "5511", "faça um raio de 2 km", pending
+            )
+
+        build.assert_awaited_once()
+        kwargs = build.await_args.kwargs
+        self.assertEqual(kwargs["latitude"], -3.7319)
+        self.assertEqual(kwargs["longitude"], -38.5267)
+        self.assertEqual(kwargs["radius"], "2")
+        self.assertEqual(kwargs["unit"], "km")
+        send_image.assert_awaited_once_with("5511", b"png-bytes")
+        self.assertTrue(any("2 km" in call.args[1] for call in send.await_args_list))
+        increment.assert_awaited_once_with("5511", "tool_draw_radius_map")
+        self.assertIsNone(location_state.get_pending_location("5511"))
+
+    async def test_draw_map_from_pending_location_rejects_unparsed_radius(self):
+        pending = location_state.PendingLocation(lat=-3.73, lng=-38.52, timestamp=0)
+        with patch.object(app, "send_message", AsyncMock()) as send:
+            await app._draw_map_from_pending_location("5511", "faça um raio de", pending)
+
+        self.assertIn("Não entendi o raio", send.await_args.args[1])
+
+    async def test_handle_chat_uses_pending_location_without_agent(self):
+        with (
+            patch.object(location_state, "_schedule", side_effect=lambda coro: coro.close()),
+            patch.object(app, "_is_retroactive_transcription_request", return_value=False),
+            patch.object(app, "extract_youtube_url", return_value=None),
+            patch.object(app, "_hydrate_pendings", AsyncMock()),
+            patch.object(
+                app,
+                "_draw_map_from_pending_location",
+                AsyncMock(),
+            ) as draw,
+            patch("aisha.agent.run_agent", AsyncMock()) as run_agent,
+            patch.object(app, "send_message", AsyncMock()),
+        ):
+            location_state.store_pending_location(
+                "5511", lat=-3.73, lng=-38.52, name="Centro", persist=False
+            )
+            await app.handle_chat("5511", "faça um raio de 2 km")
+
+        draw.assert_awaited_once()
+        self.assertEqual(draw.await_args.args[1], "faça um raio de 2 km")
+        run_agent.assert_not_awaited()
+
+    async def test_hydrate_pendings_restores_location(self):
+        with patch.object(
+            app,
+            "list_active_pendings",
+            AsyncMock(
+                return_value=[
+                    {
+                        "kind": "location",
+                        "payload": {
+                            "lat": -3.73,
+                            "lng": -38.52,
+                            "name": "Centro",
+                        },
+                    }
+                ]
+            ),
+        ):
+            await app._hydrate_pendings("5511")
+
+        pending = location_state.get_pending_location("5511")
+        self.assertIsNotNone(pending)
+        self.assertEqual(pending.name, "Centro")
 
 
 if __name__ == "__main__":

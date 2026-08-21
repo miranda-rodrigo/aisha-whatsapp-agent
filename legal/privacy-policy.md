@@ -22,6 +22,7 @@ Ao interagir com a Aisha pelo WhatsApp, podemos coletar e processar os seguintes
 | **Mensagens de texto** | Processar perguntas e gerar respostas |
 | **Áudios** | Transcrição e processamento via assistente de voz |
 | **Imagens e documentos** | Análise, edição ou extração de informações conforme solicitado |
+| **Pin de localização** | Desenhar o mapa com raio quando o próprio usuário envia a localização no WhatsApp (expira em 10 minutos) |
 | **Contexto pessoal** | Informações que o próprio usuário nos fornece voluntariamente para personalizar a experiência (ex: nome, preferências) |
 | **Preferências e idioma** | Personalização da conversa |
 | **Estatísticas de uso** | Contagens anônimas de recursos utilizados (ex: número de áudios transcritos) |
