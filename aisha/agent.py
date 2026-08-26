@@ -198,9 +198,8 @@ async def run_agent(
     """Execute the agentic loop: model decides tools, we execute, repeat until done."""
     from aisha.user_profile import get_profile
     from aisha.skills.reminder_store import get_reminders
-    from aisha.skills.reminder import _fmt_local
+    from aisha.skills.reminder import _fmt_reminder_display
     from aisha.skills.memory_store import search_memories
-    from datetime import datetime as _datetime
 
     async def _load_profile():
         return await get_profile(phone) if phone else None
@@ -234,11 +233,10 @@ async def run_agent(
     if reminder_rows:
         active_reminders = []
         for i, row in enumerate(reminder_rows, 1):
-            dt_utc = _datetime.fromisoformat(row["scheduled_at"])
             active_reminders.append({
                 "number": i,
                 "message": row["message"],
-                "datetime_display": _fmt_local(dt_utc, row.get("timezone") or user_tz),
+                "datetime_display": _fmt_reminder_display(row, user_tz),
                 "is_recurring": row.get("is_recurring", False),
             })
 

@@ -71,6 +71,47 @@ class ReminderPureTests(unittest.TestCase):
         reminder._rrule_to_trigger("CRON:invalido", first, "UTC")
         cron_trigger.assert_called_once_with(hour=12, minute=0, timezone="UTC", day="*")
 
+    def test_lista_recorrente_usa_horario_do_cron_nao_do_placeholder(self):
+        row = {
+            "message": "Tomar meu remédio",
+            "scheduled_at": "2026-08-26T15:04:22.692454+00:00",
+            "timezone": "America/Fortaleza",
+            "is_recurring": True,
+            "rrule": "CRON:0 9 * * *",
+        }
+        self.assertEqual(
+            reminder._fmt_reminder_display(row, "America/Fortaleza"),
+            "diariamente às 09:00",
+        )
+
+    def test_fmt_cron_semanal_e_mensal(self):
+        self.assertEqual(
+            reminder._fmt_cron_schedule("0 7 * * 1,3,5"),
+            "toda segunda-feira, quarta-feira e sexta-feira às 07:00",
+        )
+        self.assertEqual(reminder._fmt_cron_schedule("30 10 5 * *"), "todo dia 5 às 10:30")
+        self.assertIsNone(reminder._fmt_cron_schedule("invalido"))
+
+    def test_lista_avulso_continua_usando_scheduled_at(self):
+        row = {
+            "message": "Consulta",
+            "scheduled_at": "2026-08-16T13:30:00+00:00",
+            "timezone": "America/Sao_Paulo",
+            "is_recurring": False,
+            "rrule": None,
+        }
+        self.assertEqual(
+            reminder._fmt_reminder_display(row, "America/Sao_Paulo"),
+            "16/08 às 10:30",
+        )
+
+    def test_next_event_from_cron_pula_para_amanha_se_hora_ja_passou(self):
+        import zoneinfo
+        now = datetime(2026, 8, 26, 11, 4, tzinfo=zoneinfo.ZoneInfo("America/Fortaleza"))
+        with patch.object(reminder, "_now_local", return_value=now):
+            nxt = reminder._next_event_from_cron("0 9 * * *", "America/Fortaleza")
+        self.assertEqual(nxt, datetime(2026, 8, 27, 12, 0, tzinfo=timezone.utc))
+
 
 class ReminderAsyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_resolve_prefere_iso_e_recua_para_texto(self):
@@ -220,6 +261,19 @@ class ReminderAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Consulta", result)
         cancel.assert_awaited_once_with("r1")
         scheduler.remove_schedule.assert_awaited_once_with("j1")
+
+    async def test_handle_list_recorrente_mostra_hora_do_cron(self):
+        rows = [{
+            "message": "Tomar meu remédio",
+            "scheduled_at": "2026-08-26T15:04:22.692454+00:00",
+            "timezone": "America/Fortaleza",
+            "is_recurring": True,
+            "rrule": "CRON:0 9 * * *",
+        }]
+        with patch.object(reminder, "get_reminders", AsyncMock(return_value=rows)):
+            result = await reminder._handle_list("5511", "America/Fortaleza")
+        self.assertIn("Tomar meu remédio — diariamente às 09:00", result)
+        self.assertNotIn("12:04", result)
 
 
 if __name__ == "__main__":
