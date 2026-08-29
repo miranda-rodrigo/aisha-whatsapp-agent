@@ -1,6 +1,6 @@
 # Aisha — Assistente Pessoal via WhatsApp
 
-Aisha é uma assistente pessoal orientada a tarefas que roda no WhatsApp Business API. Ela não é um chatbot para bate-papo — seu papel é executar ações concretas: transcrever áudios, pesquisar na web, gerar imagens, criar lembretes, agendar tarefas recorrentes, analisar documentos e vídeos do YouTube, e montar mapas com raio — tudo pelo WhatsApp.
+Aisha é uma assistente pessoal orientada a tarefas que roda no WhatsApp Business API. Ela não é um chatbot para bate-papo — seu papel é executar ações concretas: transcrever áudios e vídeos, pesquisar na web, gerar imagens, criar lembretes, agendar tarefas recorrentes, analisar documentos e vídeos do YouTube, e montar mapas com raio — tudo pelo WhatsApp.
 
 ## Missão e princípios
 
@@ -54,13 +54,16 @@ Aisha é uma assistente pessoal orientada a tarefas que roda no WhatsApp Busines
 - **O que você sabe de mim?** A Aisha lista: contexto pessoal, lembretes ativos, tarefas agendadas, preferências e estatísticas de uso
 - Estatísticas rastreadas: áudios, imagens, documentos, vídeos YouTube, lembretes criados, tarefas agendadas criadas
 
-### Transcrição de Áudio
-- Áudios transcritos com Whisper e refinados com Gemini 2.5 Flash (fallback: Gemini 2.0 Flash Lite)
+### Transcrição de Áudio e Vídeo
+- Áudios e vídeos do WhatsApp transcritos com Whisper e refinados com Gemini 2.5 Flash (fallback: Gemini 2.0 Flash Lite)
 - O texto é devolvido limpo, sem vícios de linguagem ou hesitações
-- **Roteamento inteligente por contexto de sessão:**
+- **Vídeo nativo:** envie o vídeo no chat; a faixa de áudio é extraída com ffmpeg e transcrita. Vídeo sem áudio é recusado.
+- **Limite da API:** vídeo enviado como *vídeo* baixa no máximo 16 MB. Arquivo enviado como *documento* (mp4/webm/mov) sobe para 100 MB.
+- **Roteamento inteligente por contexto de sessão (áudio):**
   - **Nova sessão + sem "Aisha"** → infere que a pessoa quer transcrever (ex: encaminhar áudio para alguém)
   - **Sessão ativa + sem "Aisha"** → trata como instrução de voz para o chat
   - **"Aisha, transcreva..."** → sempre transcreve, independente do contexto
+- **Vídeo** sempre transcreve (não é chat por voz)
 - **Correção retroativa:** se a Aisha respondeu quando a pessoa queria só a transcrição, basta dizer "eu só queria a transcrição" e ela refina o áudio original (guardado por 5 minutos)
 
 ### Chat por Áudio
@@ -191,7 +194,10 @@ Mensagem WhatsApp
         │
         ├── Localização ──► Guarda lat/lng + pede o raio (ou desenha se o raio já foi pedido)
         │
+        ├── Vídeo ──► ffmpeg (extrai áudio) ──► Whisper ──► Refinamento
+        │
         └── Documento ──► Detecta tipo
+                              ├── vídeo (mp4/webm/mov) ──► mesmo pipeline do Vídeo
                               ├── PDF nativo ──► pymupdf4llm ──► gpt-4.1 resume/responde
                               ├── PDF escaneado ──► visão gpt-4.1 (OCR) ──► gpt-4.1 resume/responde
                               └── DOCX ──► python-docx (parágrafos + tabelas) ──► gpt-4.1 resume/responde

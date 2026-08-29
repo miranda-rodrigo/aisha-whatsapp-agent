@@ -471,6 +471,214 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(pending)
         self.assertEqual(pending.name, "Centro")
 
+    async def test_handle_video_transcribes_and_delivers(self):
+        message = {
+            "video": {
+                "id": "video-1",
+                "mime_type": "video/mp4",
+                "caption": "voce consegue transcrever",
+            }
+        }
+
+        with (
+            patch.object(
+                app, "_download_whatsapp_media", AsyncMock(return_value=b"mp4-bytes")
+            ) as download,
+            patch.object(app, "send_message", AsyncMock()) as send,
+            patch.object(app, "increment_stat", AsyncMock()) as increment,
+            patch.object(
+                app, "transcribe_audio_bytes", AsyncMock(return_value="fala do vídeo")
+            ) as transcribe,
+            patch.object(app, "store_raw_transcription") as store_raw,
+            patch.object(app, "_send_refined_transcription", AsyncMock()) as refine,
+        ):
+            await app.handle_video("5511", message)
+
+        download.assert_awaited_once_with("video-1")
+        send.assert_awaited_once_with("5511", "⏳ Processando vídeo...")
+        increment.assert_awaited_once_with("5511", "videos")
+        transcribe.assert_awaited_once_with(b"mp4-bytes", "video/mp4", "")
+        store_raw.assert_called_once_with("5511", "fala do vídeo")
+        refine.assert_awaited_once_with("5511", "fala do vídeo")
+
+    async def test_handle_video_explains_download_limit(self):
+        message = {"video": {"id": "video-1", "mime_type": "video/mp4"}}
+
+        with (
+            patch.object(
+                app,
+                "_download_whatsapp_media",
+                AsyncMock(side_effect=RuntimeError("HTTP 404")),
+            ),
+            patch.object(app, "send_message", AsyncMock()) as send,
+            patch.object(app, "transcribe_audio_bytes", AsyncMock()) as transcribe,
+        ):
+            await app.handle_video("5511", message)
+
+        transcribe.assert_not_awaited()
+        self.assertEqual(send.await_count, 2)
+        self.assertIn("16 MB", send.await_args.args[1])
+        self.assertIn("documento", send.await_args.args[1])
+
+    async def test_handle_video_empty_bytes_uses_limit_message(self):
+        with (
+            patch.object(app, "_download_whatsapp_media", AsyncMock(return_value=b"")),
+            patch.object(app, "send_message", AsyncMock()) as send,
+            patch.object(app, "transcribe_audio_bytes", AsyncMock()) as transcribe,
+        ):
+            await app.handle_video("5511", {"video": {"id": "video-1"}})
+
+        transcribe.assert_not_awaited()
+        self.assertIn("16 MB", send.await_args.args[1])
+
+    async def test_handle_video_reports_missing_audio_track(self):
+        with (
+            patch.object(
+                app, "_download_whatsapp_media", AsyncMock(return_value=b"mp4")
+            ),
+            patch.object(app, "send_message", AsyncMock()) as send,
+            patch.object(app, "increment_stat", AsyncMock()),
+            patch.object(
+                app,
+                "transcribe_audio_bytes",
+                AsyncMock(side_effect=RuntimeError("Este vídeo não tem faixa de áudio.")),
+            ),
+        ):
+            await app.handle_video("5511", {"video": {"id": "video-1"}})
+
+        self.assertIn("não tem faixa de áudio", send.await_args.args[1])
+
+    async def test_handle_video_empty_transcript_message(self):
+        with (
+            patch.object(
+                app, "_download_whatsapp_media", AsyncMock(return_value=b"mp4")
+            ),
+            patch.object(app, "send_message", AsyncMock()) as send,
+            patch.object(app, "increment_stat", AsyncMock()),
+            patch.object(app, "transcribe_audio_bytes", AsyncMock(return_value="  ")),
+            patch.object(app, "_send_refined_transcription", AsyncMock()) as refine,
+        ):
+            await app.handle_video("5511", {"video": {"id": "video-1"}})
+
+        refine.assert_not_awaited()
+        self.assertIn("Não encontrei fala", send.await_args.args[1])
+
+    async def test_handle_document_routes_video_file(self):
+        message = {
+            "document": {
+                "id": "doc-1",
+                "mime_type": "video/mp4",
+                "filename": "reuniao.mp4",
+            }
+        }
+
+        with (
+            patch.object(
+                app, "_download_whatsapp_media", AsyncMock(return_value=b"mp4-bytes")
+            ) as download,
+            patch.object(app, "send_message", AsyncMock()),
+            patch.object(app, "increment_stat", AsyncMock()) as increment,
+            patch.object(
+                app, "transcribe_audio_bytes", AsyncMock(return_value="fala")
+            ),
+            patch.object(app, "store_raw_transcription"),
+            patch.object(app, "_send_refined_transcription", AsyncMock()) as refine,
+        ):
+            await app.handle_document("5511", message)
+
+        download.assert_awaited_once_with("doc-1")
+        increment.assert_awaited_once_with("5511", "videos")
+        refine.assert_awaited_once_with("5511", "fala")
+
+    async def test_handle_document_routes_octet_stream_video_by_filename(self):
+        message = {
+            "document": {
+                "id": "doc-1",
+                "mime_type": "application/octet-stream",
+                "filename": "aula.mp4",
+            }
+        }
+
+        with (
+            patch.object(
+                app, "_download_whatsapp_media", AsyncMock(return_value=b"mp4-bytes")
+            ),
+            patch.object(app, "send_message", AsyncMock()),
+            patch.object(app, "increment_stat", AsyncMock()),
+            patch.object(
+                app, "transcribe_audio_bytes", AsyncMock(return_value="fala")
+            ) as transcribe,
+            patch.object(app, "store_raw_transcription"),
+            patch.object(app, "_send_refined_transcription", AsyncMock()),
+        ):
+            await app.handle_document("5511", message)
+
+        transcribe.assert_awaited_once_with(
+            b"mp4-bytes", "application/octet-stream", "aula.mp4"
+        )
+
+    async def test_handle_document_rejects_oversized_video(self):
+        too_big = b"x" * (app.WHATSAPP_VIDEO_DOCUMENT_MAX_BYTES + 1)
+        message = {
+            "document": {
+                "id": "doc-1",
+                "mime_type": "application/octet-stream",
+                "filename": "aula.mov",
+            }
+        }
+
+        with (
+            patch.object(
+                app, "_download_whatsapp_media", AsyncMock(return_value=too_big)
+            ),
+            patch.object(app, "send_message", AsyncMock()) as send,
+            patch.object(app, "transcribe_audio_bytes", AsyncMock()) as transcribe,
+        ):
+            await app.handle_document("5511", message)
+
+        transcribe.assert_not_awaited()
+        self.assertIn("100 MB", send.await_args.args[1])
+
+    async def test_handle_document_mentions_video_in_unsupported_message(self):
+        message = {
+            "document": {
+                "id": "doc-1",
+                "mime_type": "text/plain",
+                "filename": "notas.txt",
+            }
+        }
+
+        with patch.object(app, "send_message", AsyncMock()) as send:
+            await app.handle_document("5511", message)
+
+        self.assertIn("vídeo", send.await_args.args[1])
+
+    async def test_download_whatsapp_media_fetches_url_then_bytes(self):
+        client = MagicMock()
+        client.get = AsyncMock(
+            side_effect=[
+                http_response(json_data={"url": "https://media.test/file"}),
+                http_response(content=b"bytes"),
+            ]
+        )
+
+        with patch.object(app, "http_client", client, create=True):
+            result = await app._download_whatsapp_media("media-9")
+
+        self.assertEqual(result, b"bytes")
+        self.assertEqual(
+            client.get.await_args_list[0].args,
+            ("https://graph.facebook.com/v22.0/media-9",),
+        )
+        self.assertEqual(
+            client.get.await_args_list[1].args,
+            ("https://media.test/file",),
+        )
+        self.assertEqual(
+            client.get.await_args_list[1].kwargs["timeout"],
+            app._VIDEO_DOWNLOAD_TIMEOUT,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
