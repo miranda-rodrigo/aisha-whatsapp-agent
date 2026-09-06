@@ -1,0 +1,8 @@
+{
+  "source": "00-original.wav",
+  "method": "faster-whisper large-v3-turbo (cpu, int8), language=pt, beam=5, vad_filter",
+  "duration": 431.952,
+  "segments": 61,
+  "words": 158,
+  "elapsed_s": 42.1
+}

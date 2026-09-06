@@ -1,0 +1,8 @@
+{
+  "source": "03-noisereduce-stationary.wav",
+  "method": "faster-whisper large-v3-turbo (cpu, int8), language=pt, beam=5, vad_filter",
+  "duration": 431.952,
+  "segments": 37,
+  "words": 160,
+  "elapsed_s": 30.3
+}
