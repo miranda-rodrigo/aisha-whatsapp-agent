@@ -1,0 +1,8 @@
+{
+  "source": "07-rnnoise+afftdn.wav",
+  "method": "faster-whisper large-v3-turbo (cpu, int8), language=pt, beam=5, vad_filter",
+  "duration": 431.96,
+  "segments": 38,
+  "words": 82,
+  "elapsed_s": 16.9
+}
