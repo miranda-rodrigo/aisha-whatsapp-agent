@@ -2,6 +2,8 @@ import os
 import sys
 from dotenv import load_dotenv
 
+from aisha.phones import parse_allowed_numbers
+
 load_dotenv(override=False)
 
 REQUIRED = [
@@ -26,7 +28,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 XAI_API_KEY = os.environ.get("XAI_API_KEY", "")
 DATABASE_PASSWORD = os.environ.get("DATABASE_PASSWORD", "")
 
-ALLOWED_NUMBERS = set(os.environ.get("ALLOWED_NUMBERS", "").split(","))
+ALLOWED_NUMBERS = parse_allowed_numbers(os.environ.get("ALLOWED_NUMBERS", ""))
 
 GRAPH_API_URL = f"https://graph.facebook.com/v22.0/{WHATSAPP_PHONE_ID}"
 
