@@ -1,0 +1,8 @@
+{
+  "source": "06-deepfilternet3-atten20.wav",
+  "method": "faster-whisper large-v3 (cpu, int8), language=pt, beam=5, vad_filter",
+  "duration": 431.994,
+  "segments": 22,
+  "words": 107,
+  "elapsed_s": 21.4
+}
