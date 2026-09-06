@@ -8,8 +8,14 @@ Cópia dos dois arquivos do Google Drive, pesquisa das tecnologias de remoção 
 |---|---|---|---|
 | `2026_09_06_08_05_59-1.wav` | Drive `1QNyGSon4nQ2w7Zyp8eDQvtZk1eORfWn7` | PCM 16 bit, mono, 44,1 kHz (38 MB) | 7 min 12 s |
 | `2026_09_06_08_05_59.mp3` | Drive `1eOWAhN54Y67IhJSUoJcbXE2vTiIziOSH` | MP3 128 kbps, mono, 48 kHz (6,9 MB) | 7 min 12 s |
+| `real.mp3` (Drive `1RA96q5KtC2XtCHEsoGducrPdhEA8EMbl`) | enviado depois como "o áudio" | **byte a byte idêntico** ao MP3 acima (MD5 `d2ed6842069e4c5d7363b4ce0c4519c4`); não duplicado no repo | — |
 
-Os dois arquivos são **a mesma gravação** (correlação cruzada 0,978 com lag zero). O WAV é a fonte sem perdas e foi usado como entrada de todos os processamentos.
+Os arquivos são **a mesma gravação** (correlação cruzada 0,98–1,00 com lag zero em todo o arquivo). A diferença entre eles:
+
+- **MP3 (`real.mp3`)** = captura original, sem processamento. Nível médio −34 dBFS.
+- **WAV `-1`** = o mesmo áudio com **nivelamento/compressão de dinâmica** aplicado: ganho de +6 dB nos trechos altos até +18 dB nos trechos baixos (medido em janelas de 5 s). Isso sobe a fala, mas sobe o chuveiro junto e reduz a distância fala-ruído.
+
+Todos os pipelines foram rodados **nas duas fontes**: primeiro no WAV (`transcripts/large-v3*`), depois no MP3 original (`transcripts/fonte-mp3/`).
 
 Outras pastas:
 
@@ -126,10 +132,27 @@ O fluxo padrão do repositório (skill `transcribe-media` → API `whisper-1`) f
 
 "Anti-alucinação" = `initial_prompt` em pt-BR, `compression_ratio_threshold=2.0`, `log_prob_threshold=-0.8`, `no_speech_threshold=0.5`, `repetition_penalty=1.15`, `hallucination_silence_threshold=2.0`.
 
+#### Fonte MP3 original (`real.mp3`)
+
+Redução de ruído medida a partir do MP3 (piso do trecho forte: original −40,1 dB; afftdn −70,7; RNNoise −65,1; noisereduce −54,8; DeepFilterNet3 −77,6; DFN3 `-a 20` −60,8).
+
+| Modelo | Variante | Segmentos | Palavras | Leitura qualitativa |
+|---|---|---|---|---|
+| large-v3 | 00-original | 38 | 163 | coerente; mesmo conteúdo do WAV, dois loops curtos |
+| large-v3 | 05-deepfilternet3 | 23 | 59 | início bom, depois "é" ×8 e silêncio |
+| large-v3 | 06-deepfilternet3-atten20 | 22 | 107 | coerente, poucos loops |
+| large-v3 + anti-alucinação | 00-original | 25 | 114 | limpo, sem loops |
+| large-v3 + anti-alucinação | 02-rnnoise | 5 | 18 | quase tudo descartado como não-fala |
+| large-v3 + anti-alucinação | 03-noisereduce-stationary | 15 | 55 | pouco conteúdo |
+| large-v3 + anti-alucinação | 05-deepfilternet3 | 24 | 108 | sem loops, mas conteúdo divergente do original |
+| large-v3 + anti-alucinação | 06-deepfilternet3-atten20 | 6 | 19 | quase tudo descartado |
+
+Com a fonte sem nivelamento, o VAD e os limiares `no_speech`/`log_prob` descartam mais trechos: **menos alucinação, porém menos palavras**. O conteúdo reconhecido é o mesmo do WAV (a lista de falas consistentes abaixo não muda), o que confirma que o limite é o sinal captado, não o processamento.
+
 ### Conclusões
 
 1. **O trecho 86 s – 318 s (chuveiro forte) está abaixo do limiar de inteligibilidade para ASR.** Nenhum filtro recupera a fala nesse trecho: os modelos ou silenciam ou alucinam. Isso confirma o que a literatura descreve — o denoise melhora muito a audição humana (DeepFilterNet3 tira ~45 dB de ruído) mas não cria informação que o microfone não captou.
-2. Para **transcrever**, o melhor conjunto foi `large-v3` (modelo completo, não o turbo) com configuração anti-alucinação, aplicado ao **original** e ao **DeepFilterNet3**; os dois se complementam. `large-v3-turbo` alucina muito mais com SNR baixo.
+2. Para **transcrever**, o melhor conjunto foi `large-v3` (modelo completo, não o turbo) com configuração anti-alucinação, aplicado ao **original** e ao **DeepFilterNet3**; os dois se complementam. `large-v3-turbo` alucina muito mais com SNR baixo. Entre as fontes, o WAV nivelado rende mais palavras (com mais alucinação) e o MP3 original rende menos palavras (com menos alucinação); o conteúdo confiável é o mesmo.
 3. Para **ouvir**, use `denoised/05-deepfilternet3.mp3` (mais limpo) ou `denoised/06-deepfilternet3-atten20.mp3` (mais natural).
 4. Os filtros baratos (`afftdn`, `noisereduce`) não valem a pena aqui; RNNoise é uma boa opção rápida (3 s de processamento) se DeepFilterNet não estiver disponível.
 
@@ -184,6 +207,13 @@ cd audios/chuveiro
   00-original 02-rnnoise 05-deepfilternet3 06-deepfilternet3-atten20
 /tmp/dn/bin/python transcribe_variants.py /tmp/variants transcripts/large-v3-anti-alucinacao large-v3 \
   --anti-alucinacao 00-original 05-deepfilternet3 06-deepfilternet3-atten20
+
+# mesma coisa a partir do MP3 original (real.mp3)
+/tmp/dn/bin/python denoise.py 2026_09_06_08_05_59.mp3 /tmp/variants-mp3
+/tmp/dn/bin/python transcribe_variants.py /tmp/variants-mp3 transcripts/fonte-mp3/large-v3 large-v3 \
+  00-original 05-deepfilternet3 06-deepfilternet3-atten20
+/tmp/dn/bin/python transcribe_variants.py /tmp/variants-mp3 transcripts/fonte-mp3/large-v3-anti-alucinacao large-v3 \
+  --anti-alucinacao 00-original 02-rnnoise 03-noisereduce-stationary 05-deepfilternet3 06-deepfilternet3-atten20
 ```
 
 Com a chave OpenAI válida, a via oficial do repositório é:

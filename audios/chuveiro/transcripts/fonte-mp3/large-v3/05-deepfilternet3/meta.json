@@ -1,0 +1,8 @@
+{
+  "source": "05-deepfilternet3.wav",
+  "method": "faster-whisper large-v3 (cpu, int8), language=pt, beam=5, vad_filter",
+  "duration": 431.994,
+  "segments": 23,
+  "words": 59,
+  "elapsed_s": 67.5
+}
