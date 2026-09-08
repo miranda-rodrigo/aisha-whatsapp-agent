@@ -208,7 +208,12 @@ def write_outputs(perfis: list[dict]) -> None:
                "|---|---|---|---|---|---|---|---|"]
         for p in rows:
             local = "sem local" if p["sem_local"] else "com local"
-            bairro = p["bairro"] or f"(texto: {p['bairros_no_texto']})"
+            if p["bairro"]:
+                bairro = p["bairro"]
+            elif p["bairros_no_texto"]:
+                bairro = f"(texto: {p['bairros_no_texto']})"
+            else:
+                bairro = "—"
             out.append(
                 f"| {p['nome']} | {bairro} | {p['endereco']} | {p['whatsapp']} | "
                 f"{p['anunciante_desde']} | {local} | {'sim' if p['tem_video'] else 'não'} | "
