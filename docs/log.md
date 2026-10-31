@@ -46,11 +46,13 @@ O produto complementa quem autentica a prova (ata notarial, Verifact). Eles capt
 
 ## Custos medidos
 
-Preenchido depois de rodar o exemplo da corretora.
+Exemplo da corretora (398 mensagens, 57 áudios = 21,7 min, 50 imagens, 7 PDFs), medido em 31/10/2026. Pipeline completo rodou em ~39 s com 10 chamadas em paralelo.
 
 | Etapa | Modelo | Volume | Custo estimado |
 |---|---|---|---|
-| Nível 1, transcrição | | | |
-| Nível 2, comentários | | | |
-| Nível 3, análise | | | |
-| Total do exemplo | | | |
+| Nível 1, transcrição | gpt-4o-mini-transcribe | 57 áudios, 21,7 min | US$ 0,038 |
+| Nível 2, comentários | gpt-4o-mini | 114 mídias (áudio+imagem+PDF) | US$ 0,62 |
+| Nível 3, análise | gpt-4o-mini | 1 chamada | US$ 0,006 |
+| Total do exemplo | | 172 chamadas | **US$ 0,66** |
+
+Leitura para o preço: o custo variável de um dossiê completo desta conversa é ~R$ 3,70. O nível 2 domina o custo porque envia a conversa inteira como contexto em cada uma das 114 chamadas; dá para reduzir bastante com janela de contexto menor ou cache de prompt, se um dia importar. Com preço de R$ 50–150 por caso, a margem bruta é confortável; o custo relevante do produto não é API, é aquisição de cliente.

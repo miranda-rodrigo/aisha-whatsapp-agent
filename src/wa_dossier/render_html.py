@@ -63,6 +63,8 @@ body {
   cursor: pointer;
 }
 .toggles input { accent-color: #d7b56d; }
+.toggles label.off { opacity: .45; cursor: not-allowed; }
+.toggles small { font-weight: 400; opacity: .75; }
 .sheet {
   width: min(820px, calc(100% - 28px));
   margin: 22px auto 48px;
@@ -240,20 +242,23 @@ def render_html(conv: dict, html_path: Path, me: str | None = None) -> Path:
     export_dir = Path(conv["export_dir"])
     n_msg = len(conv["messages"])
     n_audio = sum(1 for m in conv["messages"] for media in m["media"] if media["kind"] == "audio")
-    checked_tx = "checked" if any(
-        media.get("transcricao") for m in conv["messages"] for media in m["media"]
-    ) else ""
-    checked_note = "checked" if any(
-        media.get("comentario") for m in conv["messages"] for media in m["media"]
-    ) else ""
-    checked_an = "checked" if conv.get("analise") else ""
+    has_tx = any(media.get("transcricao") for m in conv["messages"] for media in m["media"])
+    has_note = any(media.get("comentario") for m in conv["messages"] for media in m["media"])
+    has_an = bool(conv.get("analise"))
     classes = []
-    if checked_tx:
+    if has_tx:
         classes.append("show-tx")
-    if checked_note:
+    if has_note:
         classes.append("show-note")
-    if checked_an:
+    if has_an:
         classes.append("show-analise")
+
+    def toggle(layer: str, label: str, available: bool) -> str:
+        if not available:
+            return (f'<label class="off" title="Esta camada ainda não foi gerada. '
+                    f'Rode o build com um nível maior.">'
+                    f'<input type="checkbox" disabled> {label} <small>— ainda não gerado</small></label>')
+        return f'<label><input type="checkbox" data-layer="{layer}" checked> {label}</label>'
 
     body = [_analise(conv.get("analise"))]
     current = None
@@ -279,9 +284,9 @@ def render_html(conv: dict, html_path: Path, me: str | None = None) -> Path:
     <p>{n_msg} mensagens · {n_audio} áudios · nível {conv.get("nivel", 0)}</p>
   </div>
   <div class="toggles">
-    <label><input type="checkbox" data-layer="show-tx" {checked_tx}> Transcrições</label>
-    <label><input type="checkbox" data-layer="show-note" {checked_note}> Comentários</label>
-    <label><input type="checkbox" data-layer="show-analise" {checked_an}> Análise</label>
+    {toggle("show-tx", "Transcrições", has_tx)}
+    {toggle("show-note", "Comentários", has_note)}
+    {toggle("show-analise", "Análise", has_an)}
   </div>
 </header>
 <main class="sheet">

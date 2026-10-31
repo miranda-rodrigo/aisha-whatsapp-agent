@@ -16,7 +16,8 @@
 - `git init`, `.venv` (Python 3.11, sem instalações — etapas 1–3 só usam stdlib), `.gitignore` protegendo `data/` e `output/`.
 - Documentação de continuidade em `docs/`.
 - **Etapas 1–3 implementadas** (commit `1c1968d`): `extract.py` (zip → pasta), `parser.py` (iPhone + Android, inclusive caracteres invisíveis U+200E e marcadores de mídia em pt/en), `inventory.py` (relatório), `dossier.py` (conversa.md v0 com ids estáveis), CLI (`inventory` e `dossier`). 18 testes sintéticos passando.
-- **Nível 0 pronto**: `build` gera `conversa.html` com imagens, players de áudio e vídeo, links de PDF e id citável por mensagem. Sem IA. Camadas de transcrição, comentário e análise já têm botão, mas ficam vazias até a próxima iteração. Ideias de preço em `docs/log.md`.
+- **Nível 0 pronto**: `build` gera `conversa.html` com imagens, players de áudio e vídeo, links de PDF e id citável por mensagem. Sem IA. Ideias de preço em `docs/log.md`.
+- **Níveis 1–3 prontos e rodados no exemplo real**: 57/57 áudios transcritos (opus → mp3 via ffmpeg, porque a API recusa .opus), 114 mídias comentadas com a conversa inteira como contexto, análise com resumo/linha do tempo/valores/compromissos/pendências citando ids de mensagem (validação descartou 1 citação inventada). Saídas: `conversa.html` (camadas ligáveis; botão desabilitado quando a camada não existe), `conversa.md` + `anexos/doc-NNN.md` para IA, `custos.json`. Custo total do exemplo: **US$ 0,66** (~39 s com 10 chamadas paralelas). Instalados `openai` e `pymupdf` na `.venv` com aviso prévio.
 
 **Material de teste:**
 - Pasta `conversas_brutas/` (fora do Git). Guia em `conversas_brutas/guia.txt`.
@@ -24,6 +25,7 @@
 - Segunda exportação, pasta `WhatsApp Chat - Emanuella Paiva Corretora de planos/` (14,5 MB): 398 mensagens (254 / 144), mesmo período 22/09–31/10, 115 arquivos e **zero** mídias omitidas (57 áudios, 50 imagens, 7 PDFs, 1 vídeo). O parser leu todas as linhas. A queda de 610 para 398 está no `_chat.txt` que o WhatsApp gerou, não num erro nosso.
 
 **Pendências:**
-- Nível 1 (transcrição) ainda não começou. A chave está no `.env`, que não entra no Git.
+- Avaliação da Fase 1 (etapa 7): 10 perguntas de resposta conhecida, `.txt` bruto vs. `conversa.md` no ChatGPT.
+- Revisão humana da qualidade: transcrições (há erros pontuais, ex. "Prigo eu spartei"), comentários e análise.
 - (Opcional) exportar uma conversa de Android e um grupo.
 - Fase 2: agendar conversas com advogados do jurídico.

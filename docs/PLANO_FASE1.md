@@ -62,10 +62,13 @@ Dependências previstas para as etapas 4–5 (aprovar antes de instalar): `opena
 ### 6. Dossiê v1 completo
 - Transcrições inline, descrições curtas com links para fichas, cabeçalho com inventário, cada descrição citando o id da mensagem de origem.
 
-### 7. Avaliação (a pergunta que decide tudo)
+### 7. Avaliação (a pergunta que decide tudo) ← PRÓXIMO PASSO
 - ~10 perguntas de resposta conhecida sobre a conversa real.
-- Comparar ChatGPT com `.txt` bruto vs. com o dossiê. Registrar acertos e custo total.
+- Comparar ChatGPT com `.txt` bruto vs. com o dossiê (`output/<chat>/conversa.md`). Registrar acertos e custo total.
 - Resultado alimenta a Fase 2 e a decisão de produto.
+
+> Status 31/10/2026: etapas 1–6 concluídas e rodadas no exemplo real (US$ 0,66, ~39 s).
+> Custos detalhados em [log.md](log.md); andamento em [DIARIO.md](DIARIO.md).
 
 ## Fora do escopo da Fase 1
 

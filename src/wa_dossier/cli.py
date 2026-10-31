@@ -20,12 +20,16 @@ def main(argv: list[str] | None = None) -> int:
     p_inv = sub.add_parser("inventory", help="Relatório do que veio na exportação")
     p_inv.add_argument("source", type=Path, help=".zip exportado ou pasta já extraída")
 
-    p_build = sub.add_parser("build", help="Gera o HTML da conversa (nível 0, sem IA)")
+    p_build = sub.add_parser(
+        "build",
+        help="Gera HTML + Markdown. Níveis: 0 leitura, 1 +transcrições, 2 +comentários, 3 +análise")
     p_build.add_argument("source", type=Path, help=".zip exportado ou pasta já extraída")
     p_build.add_argument("-o", "--output", type=Path, default=Path("output"))
-    p_build.add_argument("--nivel", type=int, default=0)
+    p_build.add_argument("--nivel", type=int, default=0, choices=(0, 1, 2, 3))
     p_build.add_argument("--objetivo", default="")
     p_build.add_argument("--me", default=None, help="Seu nome no chat; suas mensagens ficam à direita")
+    p_build.add_argument("--limit", type=int, default=None,
+                         help="Processa só as N primeiras mídias de cada etapa (para testar)")
 
     p_dos = sub.add_parser("dossier", help="Gera conversa.md (v0, sem IA)")
     p_dos.add_argument("source", type=Path)
@@ -36,7 +40,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "inventory":
         print(format_inventory(build_inventory(args.source)))
     elif args.command == "build":
-        build(args.source, args.output, nivel=args.nivel, objetivo=args.objetivo, me=args.me)
+        build(args.source, args.output, nivel=args.nivel, objetivo=args.objetivo,
+              me=args.me, limit=args.limit)
     elif args.command == "dossier":
         out = generate_dossier(args.source, args.output)
         print(f"Dossiê gerado: {out}")
