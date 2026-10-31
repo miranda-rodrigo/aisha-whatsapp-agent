@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from .build import build
 from .dossier import generate_dossier
 from .inventory import build_inventory, format_inventory
 
@@ -19,6 +20,13 @@ def main(argv: list[str] | None = None) -> int:
     p_inv = sub.add_parser("inventory", help="Relatório do que veio na exportação")
     p_inv.add_argument("source", type=Path, help=".zip exportado ou pasta já extraída")
 
+    p_build = sub.add_parser("build", help="Gera o HTML da conversa (nível 0, sem IA)")
+    p_build.add_argument("source", type=Path, help=".zip exportado ou pasta já extraída")
+    p_build.add_argument("-o", "--output", type=Path, default=Path("output"))
+    p_build.add_argument("--nivel", type=int, default=0)
+    p_build.add_argument("--objetivo", default="")
+    p_build.add_argument("--me", default=None, help="Seu nome no chat; suas mensagens ficam à direita")
+
     p_dos = sub.add_parser("dossier", help="Gera conversa.md (v0, sem IA)")
     p_dos.add_argument("source", type=Path)
     p_dos.add_argument("-o", "--output", type=Path, default=Path("output"))
@@ -27,6 +35,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "inventory":
         print(format_inventory(build_inventory(args.source)))
+    elif args.command == "build":
+        build(args.source, args.output, nivel=args.nivel, objetivo=args.objetivo, me=args.me)
     elif args.command == "dossier":
         out = generate_dossier(args.source, args.output)
         print(f"Dossiê gerado: {out}")

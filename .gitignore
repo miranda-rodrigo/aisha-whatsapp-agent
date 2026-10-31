@@ -1,5 +1,6 @@
 # Conversas reais e saídas geradas: nunca versionar
 data/
+conversas_brutas/
 output/
 
 # Python

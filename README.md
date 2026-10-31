@@ -18,13 +18,13 @@ descrições de imagens/PDFs geradas com o contexto da conversa, e citações es
 source .venv/bin/activate
 
 # Inventário da exportação (sem IA, sem custo)
-PYTHONPATH=src python -m wa_dossier inventory "data/WhatsApp Chat - Fulano.zip"
+PYTHONPATH=src python -m wa_dossier inventory "conversas_brutas/1_whatsapp_chat_emanuella_paiva_corretora_de_planos.zip"
 
-# Dossiê v0 (linha do tempo em Markdown, sem IA)
-PYTHONPATH=src python -m wa_dossier dossier "data/WhatsApp Chat - Fulano.zip"
+# Conversa legível em HTML, sem IA (nível 0)
+PYTHONPATH=src python -m wa_dossier build "conversas_brutas/WhatsApp Chat - Nome" --me "Seu Nome"
 ```
 
-As exportações reais ficam em `data/` e as saídas em `output/` — ambas fora do Git.
+As exportações reais ficam em `conversas_brutas/` e as saídas em `output/` — ambas fora do Git.
 
 ## Testes
 

@@ -16,12 +16,14 @@
 - `git init`, `.venv` (Python 3.11, sem instalações — etapas 1–3 só usam stdlib), `.gitignore` protegendo `data/` e `output/`.
 - Documentação de continuidade em `docs/`.
 - **Etapas 1–3 implementadas** (commit `1c1968d`): `extract.py` (zip → pasta), `parser.py` (iPhone + Android, inclusive caracteres invisíveis U+200E e marcadores de mídia em pt/en), `inventory.py` (relatório), `dossier.py` (conversa.md v0 com ids estáveis), CLI (`inventory` e `dossier`). 18 testes sintéticos passando.
-- Etapas 2–3 ainda **não validadas com dados reais** — aguardando o `.zip` em `data/`.
+- **Nível 0 pronto**: `build` gera `conversa.html` com imagens, players de áudio e vídeo, links de PDF e id citável por mensagem. Sem IA. Camadas de transcrição, comentário e análise já têm botão, mas ficam vazias até a próxima iteração. Ideias de preço em `docs/log.md`.
 
-**Material de teste disponível:**
-- Exportação iPhone "Emanuella Paiva Corretora de planos" (610 msgs, 22/set–31/out/2026, 145 mídias citadas / 35 presentes, ~3,1 MB) — usuário ainda precisa copiar o `.zip` para `data/`.
+**Material de teste:**
+- Pasta `conversas_brutas/` (fora do Git). Guia em `conversas_brutas/guia.txt`.
+- Primeira exportação (zip de 3,1 MB, depois apagada): 610 mensagens (405 Emanuella / 205 Rodrigo), 35 arquivos, 155 mídias omitidas.
+- Segunda exportação, pasta `WhatsApp Chat - Emanuella Paiva Corretora de planos/` (14,5 MB): 398 mensagens (254 / 144), mesmo período 22/09–31/10, 115 arquivos e **zero** mídias omitidas (57 áudios, 50 imagens, 7 PDFs, 1 vídeo). O parser leu todas as linhas. A queda de 610 para 398 está no `_chat.txt` que o WhatsApp gerou, não num erro nosso.
 
-**Pendências do usuário:**
-- Copiar o `.zip` da conversa para `data/`.
-- (Opcional) exportar uma conversa de Android e um grupo para ampliar os testes.
-- Fase 2: começar a agendar conversas com advogados do jurídico (gargalo é agenda, não código).
+**Pendências:**
+- Nível 1 (transcrição) ainda não começou. A chave está no `.env`, que não entra no Git.
+- (Opcional) exportar uma conversa de Android e um grupo.
+- Fase 2: agendar conversas com advogados do jurídico.
