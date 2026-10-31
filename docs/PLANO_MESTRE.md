@@ -19,18 +19,29 @@ Uma ferramenta que transforma a exportação de uma conversa de WhatsApp (texto 
 
 ### Hipótese de negócio (a validar, não decidida)
 
-Mercado mais promissor: **profissionais que fecham negócios/casos pelo WhatsApp** (advogados, arquitetos, corretores). A dor: organizar e entender milhares de mensagens e centenas de áudios — brasileiro manda muito áudio, e nenhuma ferramenta conhecida trata isso bem.
+Mercado mais promissor: **advogados** que recebem de clientes conversas longas de WhatsApp com muito áudio. Arquitetos e corretores ficam como mercado secundário.
 
-Posicionamento possível: **complemento de autenticação, não concorrente** — Verifact/ata notarial fazem a prova; nós fazemos a organização e análise.
+**Posicionamento revisado após a pesquisa de 31/10/2026: dossiê citável, não "IA que lê WhatsApp".** Transcrever áudio e montar linha do tempo já é recurso do Jus IA (Jusbrasil) e do Jusfy, que vendem assinatura para advogados. O que eles não fazem, pelo que está publicado:
 
-Referência de mercado: chatview.ai (US$ 5–20 por chat, pagamento avulso sem assinatura, foco EUA/jurídico com Bates numbering, privacidade "no browser" como argumento central, não trata áudios).
+- receber a exportação inteira (zip com centenas de mensagens e dezenas de áudios). O Jus IA recebe um arquivo por vez, áudios de até 5 minutos, compartilhados do celular;
+- mostrar cada mídia na posição original da conversa;
+- dar um id estável por mensagem e fazer cada afirmação da IA apontar para a mensagem de origem;
+- separar o texto fiel da interpretação.
+
+Frase de posicionamento sugerida pela pesquisa: "Transforme a exportação do WhatsApp em um dossiê navegável e citável para o caso". A palavra que vende é **citável**, não "inteligente".
+
+Complemento de quem autentica, não concorrente: Verifact, PACWeb, ata notarial e perito fazem a prova; nós organizamos e tornamos o material revisável. O Verifact é candidato a parceiro.
+
+Concorrentes e referências: chatview.ai (EUA, US$ 5–20 por chat, sem transcrição de áudio), Jus IA (R$ 78,90–208,90/mês), Jusfy (R$ 77–227/mês). Detalhes e fontes em [pesquisa/deep-research-report.md](pesquisa/deep-research-report.md).
 
 ### Restrições conhecidas
 
 - **Exportação corta histórico**: ajuda antiga do WhatsApp falava em ~10k mensagens com mídia / 40k sem; mídias só as recentes. WhatsApp Web/Windows permite intervalo de datas mas sem mídia.
-- **Bot no WhatsApp**: proibido pela Meta para IA como função principal desde 15/jan/2026 (Brasil +55 excetuado por ordem do CADE; Europa liberada por 12 meses mediante taxa por mensagem). Situação instável — não construir dependendo disso.
-- **LGPD/consentimento**: conversas de terceiros irão para a API da OpenAI; precisa ser opção explícita e informada.
-- **Prova judicial**: hash não autentica conversa; STJ exige cadeia de custódia/perícia quando há dúvida razoável. **Não prometer validade jurídica.**
+- **Bot no WhatsApp**: a Meta proibiu IA de uso geral na API Business a partir de 15/01/2026. O CADE suspendeu essas regras no mercado brasileiro, decisão mantida em 04/03/2026 e reforçada em abril com multa diária. A versão "números +55 excetuados" não foi confirmada em fonte oficial. Situação instável: não depender disso. Upload do zip pela web é o canal.
+- **LGPD**: o advogado pode usar como base legal o exercício regular de direitos em processo (art. 7), mas dados sensíveis seguem o art. 11. Enviar para API fora do Brasil exige mecanismo de transferência internacional (Resolução ANPD 19/2024, cláusulas-padrão), contrato com o processador, lista de suboperadores e aviso de privacidade em português.
+- **OAB**: Recomendação 001/2024 e Resolução 16/2026 exigem supervisão do advogado, sigilo, proteção de dados e publicidade que não insinue substituir o advogado nem aprovação da OAB. Vender para o advogado, não para o cliente final.
+- **Prova judicial**: não há regra geral de que print de WhatsApp sem ata notarial seja inválido, nem de que baste sempre. O STJ distingue coleta pela polícia (rigor técnico) de coleta pelo particular confirmada em juízo. O hash do zip só prova que a nossa cópia não mudou, não que a conversa é autêntica. O TJSP aceitou relatórios do Verifact em casos individuais; dizer que "substitui a ata notarial" é exagero. **Não prometer validade jurídica.**
+- **Transcrição por IA**: o STJ (HC 1.059.475/SP, abr/2026) excluiu um laudo de IA usado para contrariar perícia acústica oficial. Não há regra exigindo perito para uma transcrição de conveniência com o áudio original anexado. Rotular como "transcrição automática para conveniência; o áudio original prevalece".
 
 ### Histórico
 

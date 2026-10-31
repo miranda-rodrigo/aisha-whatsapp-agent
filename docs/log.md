@@ -13,6 +13,29 @@ O chatview.ai cobra por conversa, sem assinatura:
 
 O argumento deles é que o chat não sai do navegador. Eles não transcrevem áudio. A numeração de provas deles (Bates) é convenção americana. No Brasil, hash de arquivo não autentica a conversa: o STJ exige cadeia de custódia quando há dúvida. Não prometer validade jurídica.
 
+## Âncoras de preço no Brasil (pesquisa de 31/10/2026)
+
+O que o advogado já paga hoje, segundo a pesquisa em `pesquisa/deep-research-report.md`:
+
+- Verifact, relatório de WhatsApp: R$ 97 por relatório.
+- Ata notarial em São Paulo, 2026: R$ 237,22 a primeira página, mais as seguintes. Minas Gerais: R$ 218,42 até duas páginas.
+- Jus IA (Jusbrasil): R$ 78,90, R$ 108,90 e R$ 208,90 por mês. Já transcreve áudio de WhatsApp, um arquivo por vez.
+- Jusfy: R$ 77, R$ 117 e R$ 227 por mês. Também transcreve áudio.
+- Astrea: R$ 209 a R$ 1.249 por mês.
+
+Proposta de teste vinda da pesquisa (é estimativa, não fato de mercado):
+
+| Oferta | Preço de teste | Por quê |
+|---|---|---|
+| Um dossiê | R$ 59 | Abaixo do Verifact e da ata, bem acima do custo de API (~R$ 3,70) |
+| Pacote de 5 casos | R$ 199 | Testa uso repetido sem exigir assinatura |
+| Escritório | R$ 349/mês com ~15 dossiês | Dentro da faixa que advogado já paga por software |
+| API / white label | Sob consulta | Só depois de haver uso repetido |
+
+A pesquisa desaconselha começar em R$ 9,90–19,90: o preço deve ser ancorado na hora do advogado poupada, não no custo de API. Discordância a testar: R$ 59 por dossiê compete com R$ 78,90/mês do Jus IA, que faz parte do trabalho. O argumento de venda precisa ser o que o Jus IA não faz (conversa inteira, citação por mensagem), senão o advogado compara só o preço.
+
+Primeiro experimento sugerido: dossiê "concierge" pago. Recrutar 15–20 advogados, processar um caso real anonimizado ou encerrado e cobrar os R$ 59. Medir se pagam, quanto tempo levam para conferir, quantas correções fazem e se mandam um segundo caso em 30 dias.
+
 ## Ideia: os níveis do produto são os planos
 
 Cada nível acrescenta uma camada e custa mais para produzir. O preço ao cliente pode seguir a mesma escada.

@@ -24,6 +24,20 @@
 - Primeira exportação (zip de 3,1 MB, depois apagada): 610 mensagens (405 Emanuella / 205 Rodrigo), 35 arquivos, 155 mídias omitidas.
 - Segunda exportação, pasta `WhatsApp Chat - Emanuella Paiva Corretora de planos/` (14,5 MB): 398 mensagens (254 / 144), mesmo período 22/09–31/10, 115 arquivos e **zero** mídias omitidas (57 áudios, 50 imagens, 7 PDFs, 1 vídeo). O parser leu todas as linhas. A queda de 610 para 398 está no `_chat.txt` que o WhatsApp gerou, não num erro nosso.
 
+**Pesquisa de mercado (deep research, em `docs/pesquisa/deep-research-report.md`):**
+- Achado que muda a estratégia: Jus IA (Jusbrasil) e Jusfy já transcrevem áudio de WhatsApp e montam linha do tempo. Conferido nas páginas oficiais do Jus IA: um arquivo por vez, áudios de até 5 min. Transcrição e resumo deixam de ser diferencial.
+- Novo posicionamento: dossiê **citável** da conversa inteira (cada afirmação aponta a mensagem de origem, mídia no lugar, texto fiel separado da interpretação). Atualizado no `PLANO_MESTRE.md`.
+- Correções a afirmações anteriores: o TJSP aceitou o Verifact em casos individuais, mas não há base para dizer que ele "substitui a ata notarial"; a exceção brasileira à regra da Meta é suspensão pelo CADE no mercado brasileiro, não uma regra "+55" confirmada.
+- Preço de teste sugerido: R$ 59 por dossiê, R$ 199 por 5 casos, R$ 349/mês para escritório. Detalhes em `log.md`.
+- Limitação do relatório: as fontes vieram como marcadores (`citeturn...`) sem os links. Antes de usar um número de processo ou um preço com um advogado, conferir na fonte original.
+
+**Requisitos de produto que saíram da pesquisa (ainda não implementados):**
+- Relatório de ingestão dentro do dossiê: o que veio, o que faltou, o que não foi ligado a nenhuma mensagem.
+- Manifesto com hash dos arquivos recebidos, rotulado como "prova que a nossa cópia não mudou", nunca como autenticação.
+- Rótulo nas transcrições: "transcrição automática para conveniência; o áudio original prevalece". Marcar trechos incertos em vez de adivinhar.
+- Validação mais forte das citações: hoje só checamos se o id existe; falta checar se a mensagem citada sustenta a frase.
+- Estado "precisa revisão" nas afirmações da análise.
+
 **Pendências:**
 - Avaliação da Fase 1 (etapa 7): 10 perguntas de resposta conhecida, `.txt` bruto vs. `conversa.md` no ChatGPT.
 - Revisão humana da qualidade: transcrições (há erros pontuais, ex. "Prigo eu spartei"), comentários e análise.
