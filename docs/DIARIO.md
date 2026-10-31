@@ -15,7 +15,8 @@
 **Feito:**
 - `git init`, `.venv` (Python 3.11, sem instalações — etapas 1–3 só usam stdlib), `.gitignore` protegendo `data/` e `output/`.
 - Documentação de continuidade em `docs/`.
-- Etapa 1 em andamento: `extract.py`, `parser.py` (iPhone + Android) e testes sintéticos.
+- **Etapas 1–3 implementadas** (commit `1c1968d`): `extract.py` (zip → pasta), `parser.py` (iPhone + Android, inclusive caracteres invisíveis U+200E e marcadores de mídia em pt/en), `inventory.py` (relatório), `dossier.py` (conversa.md v0 com ids estáveis), CLI (`inventory` e `dossier`). 18 testes sintéticos passando.
+- Etapas 2–3 ainda **não validadas com dados reais** — aguardando o `.zip` em `data/`.
 
 **Material de teste disponível:**
 - Exportação iPhone "Emanuella Paiva Corretora de planos" (610 msgs, 22/set–31/out/2026, 145 mídias citadas / 35 presentes, ~3,1 MB) — usuário ainda precisa copiar o `.zip` para `data/`.
