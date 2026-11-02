@@ -8,6 +8,9 @@ google-genai>=1.0
 dateparser>=1.2
 sqlalchemy[asyncio]>=2.0
 asyncpg>=0.29
-pymupdf4llm>=0.0.17
+# pymupdf4llm 2.x é um pacote vazio (placeholder do pymupdf 2.x) e não puxa o
+# pymupdf — sem o pin, `import pymupdf` quebra o mapa com raio e a leitura de PDF.
+pymupdf>=1.26,<2
+pymupdf4llm>=0.0.17,<2
 python-docx>=1.1
 yt-dlp>=2026.3.3
