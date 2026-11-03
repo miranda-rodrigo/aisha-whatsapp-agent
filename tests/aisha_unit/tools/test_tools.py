@@ -240,6 +240,46 @@ class ReminderToolTests(ToolTestCase):
         self.assertEqual(schedule.await_args.kwargs["lead_minutes"], 20)
         update.assert_awaited_once_with("r1", "j1")
 
+    async def test_list_recorrente_mostra_hora_do_cron_nao_placeholder(self):
+        rows = [{
+            "message": "Tomar meu remédio",
+            "scheduled_at": "2026-08-26T15:04:22.692454+00:00",
+            "timezone": "America/Fortaleza",
+            "is_recurring": True,
+            "rrule": "CRON:0 9 * * *",
+        }]
+        with patch("aisha.skills.reminder_store.get_reminders", AsyncMock(return_value=rows)):
+            result = decoded(await reminder.tool_list_reminders({}, self.ctx))
+        self.assertEqual(result["reminders"][0]["datetime_display"], "diariamente às 09:00")
+        self.assertTrue(result["reminders"][0]["is_recurring"])
+
+    async def test_create_recorrente_grava_hora_do_cron(self):
+        event_at = datetime(2026, 8, 27, 12, tzinfo=timezone.utc)
+        with patch(
+            "aisha.skills.reminder._next_event_from_cron", return_value=event_at
+        ), patch(
+            "aisha.skills.reminder._gcal_link", return_value="https://calendar.test"
+        ), patch(
+            "aisha.skills.reminder._schedule_job", AsyncMock(return_value="j1")
+        ), patch(
+            "aisha.skills.reminder_store.save_reminder", AsyncMock(return_value="r1")
+        ) as save, patch(
+            "aisha.skills.reminder_store.update_job_id", AsyncMock()
+        ):
+            result = decoded(
+                await reminder.tool_create_reminder(
+                    {
+                        "message": "Tomar meu remédio",
+                        "is_recurring": True,
+                        "cron_expression": "0 9 * * *",
+                    },
+                    self.ctx,
+                )
+            )
+        self.assertEqual(save.await_args.args[0].scheduled_at, event_at)
+        self.assertEqual(save.await_args.args[0].rrule, "CRON:0 9 * * *")
+        self.assertEqual(result["datetime_display"], "diariamente às 09:00")
+
     async def test_list_edit_e_cancel_validam_indice(self):
         with patch("aisha.skills.reminder_store.get_reminders", AsyncMock(return_value=[])):
             self.assertEqual(

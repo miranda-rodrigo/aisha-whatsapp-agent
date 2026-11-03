@@ -165,6 +165,85 @@ def _fmt_local(dt_utc: datetime, user_tz: str) -> str:
     return local.strftime("%d/%m às %H:%M")
 
 
+_CRON_DOW = {
+    "0": "domingo",
+    "7": "domingo",
+    "sun": "domingo",
+    "1": "segunda-feira",
+    "mon": "segunda-feira",
+    "2": "terça-feira",
+    "tue": "terça-feira",
+    "3": "quarta-feira",
+    "wed": "quarta-feira",
+    "4": "quinta-feira",
+    "thu": "quinta-feira",
+    "5": "sexta-feira",
+    "fri": "sexta-feira",
+    "6": "sábado",
+    "sat": "sábado",
+}
+
+
+def _join_pt(items: list[str]) -> str:
+    if len(items) == 1:
+        return items[0]
+    if len(items) == 2:
+        return f"{items[0]} e {items[1]}"
+    return f"{', '.join(items[:-1])} e {items[-1]}"
+
+
+def _fmt_cron_schedule(cron_expr: str) -> str | None:
+    """Human-readable schedule from a 5-field cron with numeric hour/minute."""
+    fields = cron_expr.strip().split()
+    if len(fields) != 5:
+        return None
+    minute, hour, day, month, dow = fields
+    if not minute.isdigit() or not hour.isdigit():
+        return None
+    time_str = f"{int(hour):02d}:{int(minute):02d}"
+    if day == "*" and month == "*" and dow in ("*", "?"):
+        return f"diariamente às {time_str}"
+    if day.isdigit() and month == "*" and dow in ("*", "?"):
+        return f"todo dia {int(day)} às {time_str}"
+    if day == "*" and month == "*" and dow not in ("*", "?"):
+        names = [
+            _CRON_DOW.get(part.strip().lower(), part.strip())
+            for part in dow.split(",")
+            if part.strip()
+        ]
+        if names:
+            return f"toda {_join_pt(names)} às {time_str}"
+    return f"às {time_str}"
+
+
+def _next_event_from_cron(cron_expr: str, user_tz: str) -> datetime | None:
+    """Next clock time matching numeric hour/minute of a 5-field cron, in UTC."""
+    fields = cron_expr.strip().split()
+    if len(fields) != 5 or not fields[0].isdigit() or not fields[1].isdigit():
+        return None
+    minute, hour = int(fields[0]), int(fields[1])
+    now = _now_local(user_tz)
+    candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if candidate <= now:
+        candidate += timedelta(days=1)
+    return candidate.astimezone(timezone.utc)
+
+
+def _fmt_reminder_display(row: dict, fallback_tz: str) -> str:
+    """Event time for list/prompt. Recurring CRON beats placeholder scheduled_at."""
+    tz = row.get("timezone") or fallback_tz
+    rrule = row.get("rrule") or ""
+    if isinstance(rrule, str) and rrule.startswith("CRON:"):
+        formatted = _fmt_cron_schedule(rrule[len("CRON:"):].strip())
+        if formatted:
+            return formatted
+    scheduled = row.get("scheduled_at")
+    if scheduled is None:
+        return "horário indefinido"
+    dt = scheduled if isinstance(scheduled, datetime) else datetime.fromisoformat(scheduled)
+    return _fmt_local(dt, tz)
+
+
 async def _extract(text: str, user_tz: str) -> ReminderExtraction:
     """Call gpt-4o-mini with structured output to extract reminder intent."""
     response = await _client.beta.chat.completions.parse(
@@ -402,7 +481,10 @@ async def _handle_create(
     await update_job_id(reminder_id, job_id)
 
     fire_display = _fmt_local(scheduled_at - timedelta(minutes=ex.lead_minutes), user_tz)
-    event_display = _fmt_local(scheduled_at, user_tz)
+    event_display = _fmt_reminder_display(
+        {"rrule": ex.rrule, "scheduled_at": scheduled_at, "timezone": user_tz},
+        user_tz,
+    )
     gcal = _gcal_link(message, scheduled_at, user_tz)
 
     recurrence_line = ""
@@ -425,8 +507,7 @@ async def _handle_list(phone: str, user_tz: str) -> str:
 
     lines = ["📋 Seus lembretes:"]
     for i, row in enumerate(rows, 1):
-        dt_utc = datetime.fromisoformat(row["scheduled_at"])
-        display = _fmt_local(dt_utc, row.get("timezone") or user_tz)
+        display = _fmt_reminder_display(row, user_tz)
         recur = " 🔁" if row.get("is_recurring") else ""
         lines.append(f"{i}. {row['message']} — {display}{recur}")
 
