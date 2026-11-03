@@ -1,4 +1,4 @@
-"""Audio transcription using OpenAI Whisper API."""
+"""Audio and video transcription using OpenAI Whisper API."""
 
 import asyncio
 import json
@@ -43,7 +43,45 @@ MIME_TO_EXT = {
     "audio/webm": ".webm",
     "video/mp4": ".mp4",
     "video/webm": ".webm",
+    "video/3gpp": ".3gp",
+    "video/3gp": ".3gp",
+    "video/quicktime": ".mov",
 }
+
+VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".3gp", ".3gpp", ".mkv", ".m4v"}
+NO_AUDIO_TRACK_ERROR = "Este vídeo não tem faixa de áudio."
+
+
+def _mime_base(mime_type: str) -> str:
+    return mime_type.split(";", 1)[0].strip().lower()
+
+
+def _ext_for_mime(mime_type: str, filename: str = "") -> str:
+    raw = mime_type.strip().lower()
+    if raw in MIME_TO_EXT:
+        return MIME_TO_EXT[raw]
+    base = _mime_base(raw)
+    if base in MIME_TO_EXT:
+        return MIME_TO_EXT[base]
+    suffix = Path(filename).suffix.lower()
+    if suffix == ".3gpp":
+        return ".3gp"
+    if suffix in VIDEO_EXTENSIONS or suffix in WHISPER_INPUT_EXTS:
+        return suffix
+    if base.startswith("video/"):
+        return ".mp4"
+    return ".ogg"
+
+
+def is_transcribable_video(mime_type: str, filename: str = "") -> bool:
+    """True for WhatsApp video messages or video files sent as documents."""
+    if _mime_base(mime_type).startswith("video/"):
+        return True
+    return Path(filename).suffix.lower() in VIDEO_EXTENSIONS
+
+
+def _is_video_source(mime_type: str, path: Path) -> bool:
+    return is_transcribable_video(mime_type, path.name)
 
 
 def _probe_media(path: Path) -> dict:
@@ -147,16 +185,23 @@ def _transcribe_file(client: OpenAI, audio_path: Path) -> str:
     return transcription.text
 
 
-def _transcribe_sync(audio_bytes: bytes, mime_type: str) -> str:
+def _transcribe_sync(audio_bytes: bytes, mime_type: str, filename: str = "") -> str:
     """Synchronous transcription pipeline: skip recode when possible, chunk if needed."""
     client = _client
-    ext = MIME_TO_EXT.get(mime_type, ".ogg")
+    ext = _ext_for_mime(mime_type, filename)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         raw_path = Path(tmp_dir) / f"input{ext}"
         raw_path.write_bytes(audio_bytes)
 
-        if _should_send_raw(raw_path):
+        is_video = _is_video_source(mime_type, raw_path)
+        if is_video:
+            probed = _probe_media(raw_path)
+            if not probed.get("has_audio"):
+                raise RuntimeError(NO_AUDIO_TRACK_ERROR)
+
+        # Never send a video container to Whisper — extract the audio track first.
+        if not is_video and _should_send_raw(raw_path):
             return _transcribe_file(client, raw_path)
 
         mp3_path = Path(tmp_dir) / "audio.mp3"
@@ -183,6 +228,8 @@ def _transcribe_sync(audio_bytes: bytes, mime_type: str) -> str:
         return "\n".join(results[i] for i in range(total))
 
 
-async def transcribe_audio_bytes(audio_bytes: bytes, mime_type: str) -> str:
+async def transcribe_audio_bytes(
+    audio_bytes: bytes, mime_type: str, filename: str = ""
+) -> str:
     """Async wrapper — runs transcription in a thread to avoid blocking the event loop."""
-    return await asyncio.to_thread(_transcribe_sync, audio_bytes, mime_type)
+    return await asyncio.to_thread(_transcribe_sync, audio_bytes, mime_type, filename)

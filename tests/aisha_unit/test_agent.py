@@ -70,6 +70,7 @@ class SystemPromptTests(unittest.TestCase):
         self.assertIn("NUNCA use image_generation para mapas", prompt)
         self.assertIn("area_label", prompt)
         self.assertIn("Pin de localização do WhatsApp", prompt)
+        self.assertIn("Vídeo enviado no chat", prompt)
 
 
 class AgentLoopTests(unittest.IsolatedAsyncioTestCase):

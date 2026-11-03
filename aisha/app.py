@@ -98,7 +98,7 @@ from aisha.skills.scheduled_task import handle_scheduled_task, restore_scheduled
 from aisha.whatsapp_http import aclose as aclose_whatsapp_client
 from aisha.session import delete_session, get_response_id, upsert_session
 from aisha.skills.timezone_inference import infer_timezone
-from aisha.skills.transcribe import transcribe_audio_bytes
+from aisha.skills.transcribe import is_transcribable_video, transcribe_audio_bytes
 from aisha.user_profile import get_profile, increment_stat, upsert_timezone
 from aisha.skills.youtube import (
     VideoAnalysis,
@@ -146,6 +146,24 @@ _openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 _background_tasks: set[asyncio.Task] = set()
 LONG_TRANSCRIPTION_WORD_LIMIT = 500
 TRANSCRIPTION_PREVIEW_WORDS = 60
+WHATSAPP_VIDEO_LIMIT_MB = 16
+WHATSAPP_VIDEO_DOCUMENT_MAX_BYTES = 100 * 1024 * 1024
+_VIDEO_DOWNLOAD_TIMEOUT = 180.0
+_WHATSAPP_VIDEO_LIMIT_MSG = (
+    "Não consegui baixar este vídeo. A API do WhatsApp limita vídeos enviados "
+    f"como *vídeo* a {WHATSAPP_VIDEO_LIMIT_MB} MB.\n\n"
+    "Envie de novo como *documento* (anexo/arquivo) — o limite sobe para 100 MB — "
+    "ou extraia o áudio e mande como áudio."
+)
+_WHATSAPP_VIDEO_DOC_DOWNLOAD_MSG = (
+    "Não consegui baixar este arquivo. Tente enviar de novo, "
+    "ou extraia o áudio e mande como áudio do WhatsApp."
+)
+_WHATSAPP_VIDEO_DOC_LIMIT_MSG = (
+    "Este arquivo é muito grande (máx. 100 MB). "
+    "Extraia o áudio e envie como áudio do WhatsApp."
+)
+_VIDEO_EMPTY_TRANSCRIPT_MSG = "Não encontrei fala neste vídeo."
 
 
 def _spawn(coro) -> None:
@@ -379,6 +397,8 @@ async def _process_webhook(body: dict) -> None:
             await handle_document(sender, message)
         elif msg_type == "location":
             await handle_location(sender, message)
+        elif msg_type == "video":
+            await handle_video(sender, message)
         else:
             await send_message(sender, f"Tipo '{msg_type}' ainda não suportado.")
     except Exception:
@@ -756,6 +776,30 @@ async def _send_refined_transcription(sender: str, raw_text: str) -> None:
     await send_message(sender, refined_text)
 
 
+async def _download_whatsapp_media(media_id: str) -> bytes:
+    """Download media bytes from the WhatsApp Cloud API."""
+    media_resp = await http_client.get(f"https://graph.facebook.com/v22.0/{media_id}")
+    media_resp.raise_for_status()
+    media_url = media_resp.json()["url"]
+    file_resp = await http_client.get(media_url, timeout=_VIDEO_DOWNLOAD_TIMEOUT)
+    file_resp.raise_for_status()
+    return file_resp.content
+
+
+async def _transcribe_and_deliver_media(
+    sender: str,
+    media_bytes: bytes,
+    mime_type: str,
+    filename: str = "",
+) -> None:
+    raw_text = await transcribe_audio_bytes(media_bytes, mime_type, filename)
+    if not raw_text.strip():
+        await send_message(sender, _VIDEO_EMPTY_TRANSCRIPT_MSG)
+        return
+    store_raw_transcription(sender, raw_text)
+    await _send_refined_transcription(sender, raw_text)
+
+
 async def handle_audio(sender: str, message: dict):
     """Downloads audio, transcribes it, and routes to chat or transcription.
 
@@ -850,6 +894,35 @@ async def handle_audio(sender: str, message: dict):
         await send_message(sender, f"Erro ao processar áudio: {e}")
 
 
+async def handle_video(sender: str, message: dict):
+    """Downloads a WhatsApp video, transcribes the audio track, and returns text."""
+    video = message["video"]
+    video_id = video["id"]
+    mime_type = video.get("mime_type", "video/mp4")
+    log.info(f"Downloading video {video_id}")
+    await send_message(sender, "⏳ Processando vídeo...")
+
+    try:
+        video_bytes = await _download_whatsapp_media(video_id)
+    except Exception:
+        log.exception("Video download failed")
+        await send_message(sender, _WHATSAPP_VIDEO_LIMIT_MSG)
+        return
+
+    if not video_bytes:
+        await send_message(sender, _WHATSAPP_VIDEO_LIMIT_MSG)
+        return
+
+    log.info(f"Video downloaded: {len(video_bytes)} bytes, mime={mime_type}")
+    await increment_stat(sender, "videos")
+
+    try:
+        await _transcribe_and_deliver_media(sender, video_bytes, mime_type)
+    except Exception as e:
+        log.exception("Video processing failed")
+        await send_message(sender, f"Erro ao processar vídeo: {e}")
+
+
 async def handle_image(sender: str, message: dict):
     """Downloads an image from WhatsApp and stores it awaiting user instructions."""
     image_id = message["image"]["id"]
@@ -894,6 +967,41 @@ async def handle_image(sender: str, message: dict):
         await send_message(sender, f"Erro ao processar imagem: {e}")
 
 
+async def _handle_video_document(sender: str, doc: dict) -> None:
+    """Transcribe a video file sent as a WhatsApp document (higher size limit)."""
+    doc_id = doc["id"]
+    mime_type = doc.get("mime_type", "video/mp4")
+    filename = doc.get("filename", "video.mp4")
+    await send_message(sender, "⏳ Processando vídeo...")
+
+    try:
+        video_bytes = await _download_whatsapp_media(doc_id)
+    except Exception:
+        log.exception("Video document download failed")
+        await send_message(sender, _WHATSAPP_VIDEO_DOC_DOWNLOAD_MSG)
+        return
+
+    if not video_bytes:
+        await send_message(sender, _WHATSAPP_VIDEO_DOC_DOWNLOAD_MSG)
+        return
+
+    if len(video_bytes) > WHATSAPP_VIDEO_DOCUMENT_MAX_BYTES:
+        await send_message(sender, _WHATSAPP_VIDEO_DOC_LIMIT_MSG)
+        return
+
+    log.info(
+        f"Video document downloaded: {filename} ({len(video_bytes)} bytes, mime={mime_type})"
+    )
+    await increment_stat(sender, "videos")
+    try:
+        await _transcribe_and_deliver_media(
+            sender, video_bytes, mime_type, filename
+        )
+    except Exception as e:
+        log.exception("Video document processing failed")
+        await send_message(sender, f"Erro ao processar vídeo: {e}")
+
+
 async def handle_document(sender: str, message: dict):
     """Downloads a document from WhatsApp, extracts text, and summarizes it."""
     doc = message["document"]
@@ -903,11 +1011,15 @@ async def handle_document(sender: str, message: dict):
     log.info(f"Document received: {filename} ({mime_type}), id={doc_id}")
 
     try:
+        if is_transcribable_video(mime_type, filename):
+            await _handle_video_document(sender, doc)
+            return
+
         if not is_supported_document(mime_type):
             await send_message(
                 sender,
                 f"Formato não suportado: _{filename}_\n\n"
-                "Formatos aceitos: *PDF* e *Word (.docx)*",
+                "Formatos aceitos: *PDF*, *Word (.docx)* e *vídeo* (mp4, webm, mov).",
             )
             return
 

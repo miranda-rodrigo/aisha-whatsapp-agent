@@ -93,7 +93,8 @@ def _build_system_prompt(
         "    * Só use create_reminder se o lembrete é claramente novo.",
         "- Quando o usuário pedir uma tarefa recorrente/agendada, use create_scheduled_task.",
         "- YouTube: você TEM a skill analyze_youtube_video (transcrever, resumir, pontos-chave). "
-        "Áudio do WhatsApp é outra skill (Whisper). Não diga que só transcreve áudio.",
+        "Áudio e vídeo do WhatsApp são outra skill (Whisper). Não diga que só transcreve áudio. "
+        "Vídeo enviado no chat (não YouTube) já é transcrito automaticamente.",
         "- Link do YouTube COM instrução na mesma mensagem: execute direto (analyze_youtube_video ou download_video).",
         "- Link do YouTube SEM instrução na mensagem, MAS o turno anterior já deixou a intenção clara "
         "(ex: usuário perguntou se você transcreve, pediu transcrição, resumo, download): "

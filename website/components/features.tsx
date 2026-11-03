@@ -26,8 +26,8 @@ const features = [
   },
   {
     icon: Mic,
-    title: "Transcrição de Áudio",
-    description: "Envie áudios e receba textos limpos e refinados. Perfeito para reuniões e anotações.",
+    title: "Transcrição de Áudio e Vídeo",
+    description: "Envie áudios ou vídeos do WhatsApp e receba o texto limpo. Vídeos longos voltam como arquivo .txt.",
     highlight: "Whisper AI"
   },
   {
