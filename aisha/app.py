@@ -31,6 +31,7 @@ from aisha.config import (
     WHATSAPP_APP_SECRET,
     WHATSAPP_TOKEN,
 )
+from aisha.phones import is_allowed_number
 from aisha.messaging import split_whatsapp_text, typing_indicator_payload
 from aisha.supabase_http import aclose as aclose_supabase_client
 from aisha.models import EXTRACT_MODEL, OPENAI_SERVICE_TIER
@@ -361,7 +362,7 @@ async def _process_webhook(body: dict) -> None:
             f"— possible echo: {text_preview[:80]!r}"
         )
 
-    if sender not in ALLOWED_NUMBERS:
+    if not is_allowed_number(sender, ALLOWED_NUMBERS):
         log.info(f"Ignored: {sender} not in allowed list")
         return
 

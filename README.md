@@ -392,7 +392,7 @@ WHATSAPP_APP_SECRET=app_secret_da_meta
 | `WHATSAPP_PHONE_ID` | Phone Number ID do número da Aisha |
 | `WEBHOOK_VERIFY_TOKEN` | Token arbitrário para verificação do webhook pela Meta |
 | `OPENAI_API_KEY` | Chave da API OpenAI |
-| `ALLOWED_NUMBERS` | Números autorizados separados por vírgula (formato sem + e sem espaços) |
+| `ALLOWED_NUMBERS` | Números autorizados separados por vírgula. Aceita `+`, espaços e o 9 extra do celular BR — a Aisha normaliza. |
 | `SUPABASE_URL` | URL do projeto Supabase (ex: `https://xxxxx.supabase.co`) |
 | `SUPABASE_KEY` | Publishable ou Secret key do Supabase |
 | `DATABASE_PASSWORD` | Senha do PostgreSQL (usada para conexão do APScheduler) |
@@ -516,12 +516,12 @@ No painel de developers.facebook.com:
 ## Notas de implementação
 
 - **Deduplicação:** A Meta pode enviar o mesmo webhook duas vezes. O app mantém um cache de até 1000 IDs de mensagens processadas para evitar respostas duplicadas.
-- **Allowlist:** Apenas números em `ALLOWED_NUMBERS` recebem respostas. Números brasileiros chegam sem o 9 extra (ex: `5585941322222` → `558594132222`).
+- **Allowlist:** Apenas números em `ALLOWED_NUMBERS` recebem respostas. Espaços, `+` e o 9 extra do celular BR são ignorados na comparação. A Meta costuma mandar o número BR sem o 9 extra (ex: `5585999065040` → `558599065040`); os dois formatos passam.
 - **ffmpeg:** Só recodifica quando o arquivo não cabe no Whisper (~24 MB) ou o container não é aceito. Áudio pequeno já compatível (ogg/mp3/m4a/wav/webm/mp4) vai direto. ffmpeg está no Dockerfile.
 - **Chunking de áudio:** Áudios maiores que 24 MB são divididos em chunks de 10 minutos e transcritos em paralelo (até 6 workers).
 - **`.dockerignore`:** Impede que o `.env` local (com placeholders) sobreescreva as variáveis de produção dentro do container.
 - **Porta dinâmica:** O Dockerfile usa `${PORT:-8000}` para compatibilidade com Railway, que injeta a porta via variável de ambiente.
-- **Números brasileiros:** A Meta normaliza números BR removendo um dígito 9. Configure `ALLOWED_NUMBERS` com o formato que a Meta envia.
+- **Números brasileiros:** A Meta costuma omitir o 9 extra no `from` do webhook. Não precisa acertar o formato: a allowlist aceita 12 ou 13 dígitos.
 - **Timezone:** O servidor roda em UTC (Railway). Lembretes usam `USER_TIMEZONE` para calcular horários relativos corretamente.
 - **PgBouncer:** O Supabase usa PgBouncer em modo transaction, que não suporta prepared statements. O engine é criado com `statement_cache_size=0` para evitar `DuplicatePreparedStatementError` na inicialização do APScheduler.
 - **Tarefas agendadas vs. lembretes:** Lembretes enviam texto fixo na hora agendada. Tarefas agendadas executam o agente (web e/ou X) a cada disparo, gerando conteúdo dinâmico. Ambos usam APScheduler com persistência no PostgreSQL.
