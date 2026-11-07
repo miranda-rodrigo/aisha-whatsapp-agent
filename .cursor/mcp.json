@@ -6,6 +6,10 @@
     },
     "supabase": {
       "url": "https://mcp.supabase.com/mcp?project_ref=iooztfbnnqndqjywlhjd&read_only=true&features=database"
+    },
+    "Meta Developer Tools": {
+      "url": "https://mcp.facebook.com/devtools",
+      "type": "http"
     }
   }
 }
