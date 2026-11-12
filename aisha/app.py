@@ -19,6 +19,8 @@ from fastapi.responses import FileResponse
 from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from aisha.chat_export import handler as export_handler
+
 from aisha.skills.chat import chat_with_webpage, classify, classify_pending_response, wants_new_session
 from aisha.config import (
     ALLOWED_NUMBERS,
@@ -644,6 +646,8 @@ async def handle_chat(sender: str, text: str, msg_id: str = ""):
 
     _processing.add(sender)
     try:
+        if await export_handler.command(sender, text, send_message):
+            return
         if _is_retroactive_transcription_request(text):
             raw = await pop_raw_transcription_async(sender)
             if raw:
@@ -897,6 +901,9 @@ async def handle_image(sender: str, message: dict):
 async def handle_document(sender: str, message: dict):
     """Downloads a document from WhatsApp, extracts text, and summarizes it."""
     doc = message["document"]
+    if export_handler.is_export(doc):
+        await export_handler.document(sender, doc, http_client, send_message, _processing)
+        return
     doc_id = doc["id"]
     mime_type = doc.get("mime_type", "")
     filename = doc.get("filename", "document")
