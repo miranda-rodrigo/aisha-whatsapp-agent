@@ -1,4 +1,5 @@
 """Bounded, in-memory ingestion. Never extract or open media attachments."""
+
 import hashlib
 import io
 import json
@@ -44,16 +45,24 @@ def ingest_zip(data: bytes) -> list[dict]:
                 raise ExportError("O ZIP contém arquivos demais. Exporte sem mídia.")
             if any(item.flag_bits & 1 for item in entries):
                 raise ExportError("ZIP protegido por senha não é aceito.")
-            candidates = [item for item in entries if not item.is_dir()
-                          and PurePosixPath(item.filename).suffix.lower() == ".txt"
-                          and not any(p.startswith((".", "__MACOSX"))
-                                      for p in PurePosixPath(item.filename).parts)]
+            candidates = [
+                item
+                for item in entries
+                if not item.is_dir()
+                and PurePosixPath(item.filename).suffix.lower() == ".txt"
+                and not any(
+                    p.startswith((".", "__MACOSX"))
+                    for p in PurePosixPath(item.filename).parts
+                )
+            ]
             parsed = []
             total = 0
             for item in candidates:
                 total += item.file_size
                 if total > MAX_TEXT_BYTES:
-                    raise ExportError("O texto descompactado excede 2 MB. Exporte um período menor.")
+                    raise ExportError(
+                        "O texto descompactado excede 2 MB. Exporte um período menor."
+                    )
                 with archive.open(item) as stream:
                     raw = stream.read(MAX_TEXT_BYTES + 1)
                 if len(raw) > MAX_TEXT_BYTES:
@@ -64,20 +73,43 @@ def ingest_zip(data: bytes) -> list[dict]:
                     continue
                 if result.messages:
                     if result.unparsed_lines:
-                        raise ExportError("Há linhas não reconhecidas antes da conversa. Reexporte pelo WhatsApp.")
+                        raise ExportError(
+                            "Há linhas não reconhecidas antes da conversa. Reexporte pelo WhatsApp."
+                        )
                     parsed.append(result)
             if not parsed:
-                raise ExportError("Nenhuma conversa WhatsApp reconhecida no ZIP (texto UTF-8, iPhone ou Android).")
+                raise ExportError(
+                    "Nenhuma conversa WhatsApp reconhecida no ZIP (texto UTF-8, iPhone ou Android)."
+                )
             if len(parsed) != 1:
-                raise ExportError("O ZIP contém mais de uma conversa. Envie uma por vez.")
+                raise ExportError(
+                    "O ZIP contém mais de uma conversa. Envie uma por vez."
+                )
     except ExportError:
         raise
-    except (zipfile.BadZipFile, RuntimeError, NotImplementedError, OSError, EOFError) as exc:
-        raise ExportError("Não consegui ler o ZIP. Ele pode estar corrompido ou usar compressão incompatível.") from exc
+    except (
+        zipfile.BadZipFile,
+        RuntimeError,
+        NotImplementedError,
+        OSError,
+        EOFError,
+    ) as exc:
+        raise ExportError(
+            "Não consegui ler o ZIP. Ele pode estar corrompido ou usar compressão incompatível."
+        ) from exc
     result = parsed[0]
-    messages = [dict(id=mid, date=msg.date, time=msg.time,
-                     sender=msg.sender or "[sistema]", text=msg.text)
-                for msg, mid in zip(result.messages, build_message_ids(result.messages))]
+    messages = [
+        dict(
+            id=mid,
+            date=msg.date,
+            time=msg.time,
+            sender=msg.sender or "[sistema]",
+            text=msg.text,
+        )
+        for msg, mid in zip(result.messages, build_message_ids(result.messages))
+    ]
     if len(format_conversation(messages)) > MAX_CONTEXT_CHARS:
-        raise ExportError("A conversa excede 100 mil caracteres formatados. Exporte um período menor; nenhuma parte foi analisada.")
+        raise ExportError(
+            "A conversa excede 100 mil caracteres formatados. Exporte um período menor; nenhuma parte foi analisada."
+        )
     return messages

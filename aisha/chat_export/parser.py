@@ -31,7 +31,9 @@ class Message:
     sender: str  # "" para mensagens de sistema
     text: str
     attachments: list[str] = field(default_factory=list)  # nomes de arquivo citados
-    omitted_media: list[str] = field(default_factory=list)  # tipos omitidos ("image", ...)
+    omitted_media: list[str] = field(
+        default_factory=list
+    )  # tipos omitidos ("image", ...)
     line_number: int = 0  # linha onde a mensagem começa (1-based)
 
     @property
@@ -63,7 +65,9 @@ AND_SYS_RE = re.compile(rf"^{_DATE},?\s+{_TIME}\s-\s(.*)$")
 
 # Anexo presente no zip.
 IOS_ATTACH_RE = re.compile(r"<(?:attached|anexado):\s*(.+?)>")
-AND_ATTACH_RE = re.compile(r"^(.+?)\s\((?:file attached|arquivo anexado)\)\s*$", re.MULTILINE)
+AND_ATTACH_RE = re.compile(
+    r"^(.+?)\s\((?:file attached|arquivo anexado)\)\s*$", re.MULTILINE
+)
 
 # Mídia citada mas não incluída na exportação. Mapeia marcador -> tipo.
 OMITTED_MARKERS = {
@@ -172,17 +176,26 @@ def parse_chat(text: str) -> ParseResult:
         m = msg_re.match(line)
         if m:
             date, time, sender, body = m.groups()
-            current = Message(date=date, time=time,
-                              sender=_drop_invisible(sender).strip(),
-                              text=_drop_invisible(body), line_number=i)
+            current = Message(
+                date=date,
+                time=time,
+                sender=_drop_invisible(sender).strip(),
+                text=_drop_invisible(body),
+                line_number=i,
+            )
             messages.append(current)
             continue
 
         s = sys_re.match(line)
         if s:
             date, time, body = s.groups()
-            current = Message(date=date, time=time, sender="",
-                              text=_drop_invisible(body), line_number=i)
+            current = Message(
+                date=date,
+                time=time,
+                sender="",
+                text=_drop_invisible(body),
+                line_number=i,
+            )
             messages.append(current)
             continue
 
