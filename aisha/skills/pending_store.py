@@ -53,7 +53,8 @@ async def list_active_pendings(phone: str) -> list[dict]:
     resp = await client.get(
         _TABLE_URL,
         headers=_HEADERS,
-        params=pending_list_params(phone, datetime.now(timezone.utc).isoformat()),
+        params={**pending_list_params(phone, datetime.now(timezone.utc).isoformat()),
+                "kind": "neq.wa_export"},
     )
     if resp.status_code != 200:
         log.warning(f"Failed to list pendings for {phone}: {resp.status_code}")
@@ -99,5 +100,5 @@ async def clear_all_pending(phone: str) -> None:
     await client.delete(
         _TABLE_URL,
         headers=_HEADERS,
-        params={"phone": f"eq.{phone}"},
+        params={"phone": f"eq.{phone}", "kind": "neq.wa_export"},
     )
