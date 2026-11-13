@@ -3,11 +3,12 @@ import os
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from aisha.chat_export import handler, pdf, store
-from aisha.chat_export.ingest import ExportError
 from tests.aisha_unit._helpers import configure_test_env
 
 configure_test_env()
+
+from aisha.chat_export import handler, pdf, store  # noqa: E402
+from aisha.chat_export.ingest import ExportError  # noqa: E402
 MESSAGES = [
     dict(
         id="msg-a",
@@ -159,3 +160,35 @@ class PdfTests(unittest.IsolatedAsyncioTestCase):
                 *(pdf.render_pdf(MESSAGES, ANALYSIS, "Teste") for _ in range(3))
             )
         self.assertEqual(peak, 1)
+
+    async def test_browser_isolation_and_cleanup_on_failure_and_cancel(self):
+        from pathlib import Path
+        from unittest.mock import MagicMock
+
+        import playwright.async_api
+
+        for failure in (RuntimeError("render failed"), asyncio.CancelledError()):
+            context = AsyncMock()
+            page = AsyncMock()
+            context.new_page.return_value = page
+            page.pdf.side_effect = failure
+            pw = MagicMock()
+            pw.chromium.launch_persistent_context = AsyncMock(return_value=context)
+            manager = AsyncMock()
+            manager.__aenter__.return_value = pw
+            with patch.object(
+                playwright.async_api, "async_playwright", return_value=manager
+            ):
+                with self.assertRaises(type(failure)):
+                    await pdf._render("<html>synthetic</html>")
+            call = pw.chromium.launch_persistent_context.call_args
+            self.assertFalse(Path(call.args[0]).exists())
+            self.assertFalse(call.kwargs["java_script_enabled"])
+            self.assertEqual(call.kwargs["service_workers"], "block")
+            context.close.assert_awaited_once()
+            route_callback = context.route.call_args.args[1]
+            route = AsyncMock()
+            route.request.url = "https://external.invalid/tracker"
+            await route_callback(route)
+            route.abort.assert_awaited_once()
+            route.fulfill.assert_not_awaited()
