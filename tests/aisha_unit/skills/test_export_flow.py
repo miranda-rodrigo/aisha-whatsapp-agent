@@ -94,9 +94,7 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
         async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
             with (
                 patch.object(store, "save", AsyncMock()) as save,
-                patch.object(
-                    handler, "analyze", AsyncMock(return_value="Análise")
-                ) as analyze,
+                patch.object(handler, "deliver_pdf", AsyncMock()) as analyze,
             ):
                 await handler.document(
                     "alice",
@@ -106,8 +104,7 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
                     processing,
                 )
                 save.assert_awaited_once()
-                self.assertEqual(analyze.call_args.args[0], save.call_args.args[1])
-                self.assertIn("sobre a conversa:", send.call_args.args[1])
+                analyze.assert_awaited_once_with("alice", send, None)
                 self.assertFalse(processing)
                 save.reset_mock()
                 analyze.reset_mock()
