@@ -4,8 +4,10 @@ import json
 import re
 
 from openai import AsyncOpenAI
+
 from aisha.config import OPENAI_API_KEY
 from aisha.models import DOCUMENT_MODEL, OPENAI_SERVICE_TIER
+
 from .ingest import ExportError, format_conversation
 
 _client = AsyncOpenAI(api_key=OPENAI_API_KEY)
@@ -19,13 +21,12 @@ No máximo 8 conclusões curtas. Se não houver evidência, retorne claims vazio
 Não coloque IDs no campo text. Não invente fatos ou IDs."""
 
 
-def render_analysis(payload: dict, messages: list[dict]) -> str:
+def validate_analysis(payload: dict, messages: list[dict]) -> dict:
     by_id = {m["id"]: m for m in messages}
     claims = payload.get("claims") if isinstance(payload, dict) else None
     if not isinstance(claims, list):
         raise ExportError("A análise retornou um formato inválido. Tente novamente.")
-    lines = ["Análise somente do texto. Áudios, imagens e PDFs não foram analisados."]
-    kept = 0
+    valid = []
     for claim in claims[:8]:
         if not isinstance(claim, dict):
             continue
@@ -41,7 +42,16 @@ def render_analysis(payload: dict, messages: list[dict]) -> str:
             or any(not isinstance(mid, str) or mid not in by_id for mid in ids)
         ):
             continue
-        kept += 1
+        valid.append({"text": text.strip(), "ids": list(dict.fromkeys(ids))})
+    return {"claims": valid}
+
+
+def render_analysis(payload: dict, messages: list[dict]) -> str:
+    by_id = {m["id"]: m for m in messages}
+    claims = validate_analysis(payload, messages)["claims"]
+    lines = ["Análise somente do texto. Áudios, imagens e PDFs não foram analisados."]
+    for claim in claims:
+        text, ids = claim["text"], claim["ids"]
         lines.append("\n" + text.strip())
         for mid in dict.fromkeys(ids):
             msg = by_id[mid]
@@ -51,7 +61,7 @@ def render_analysis(payload: dict, messages: list[dict]) -> str:
             lines.append(
                 f"[{mid}] {msg['date']} {msg['time']} — {msg['sender']}: {excerpt}"
             )
-    if not kept:
+    if not claims:
         lines.append(
             "\nNão encontrei conclusões com referências válidas para responder. Reformule a pergunta."
         )
@@ -61,7 +71,7 @@ def render_analysis(payload: dict, messages: list[dict]) -> str:
     return "\n".join(lines)
 
 
-async def analyze(messages: list[dict], question: str = "") -> str:
+async def analyze_structured(messages: list[dict], question: str = "") -> dict:
     if len(question) > 4000:
         raise ExportError("Use uma pergunta de até 4 mil caracteres.")
     response = await _client.chat.completions.create(
@@ -92,4 +102,8 @@ async def analyze(messages: list[dict], question: str = "") -> str:
         raise ExportError(
             "Não consegui gerar uma análise válida. Tente novamente."
         ) from exc
-    return render_analysis(payload, messages)
+    return validate_analysis(payload, messages)
+
+
+async def analyze(messages: list[dict], question: str = "") -> str:
+    return render_analysis(await analyze_structured(messages, question), messages)

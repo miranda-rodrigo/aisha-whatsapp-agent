@@ -64,3 +64,59 @@ o diretório de trabalho inteiro, pois contém mudanças anteriores não relacio
 Após deploy, verificar `/health`, executar teste sintético no container e ativar
 `WHATSAPP_EXPORT_ENABLED=true`. Para rollback funcional, definir a flag como false
 (e aplicar o redeploy); para rollback de código, usar a implantação anterior.
+
+## PDF — plano aprovado e implementação (13/11/2026)
+
+O ZIP recebe uma confirmação curta; o resultado inicial é `conversa-analisada.pdf`
+anexado como `application/pdf`. O PDF abre com título, período, participantes e
+contagem, depois apresenta interpretações da IA com links internos e a conversa
+integral. Autores, horários, mensagens de sistema e IDs são preservados. Mídias
+aparecem sinalizadas, sem transcrição ou interpretação. A análise continua sujeita
+a erros mesmo quando a referência existe.
+
+O template de impressão se inspira em `wa_dossier/render_html.py`: azul escuro,
+balões claros e azuis, referências douradas e separadores por dia. A4 retrato,
+texto selecionável e páginas numeradas. O primeiro participante ocupa a direita;
+a legenda deixa claro que ele não é necessariamente quem enviou o ZIP. Mensagens
+longas continuam na página seguinte, sem truncamento.
+
+- `reenviar pdf` recupera conversa e análise salvas. Não chama o modelo novamente
+  se a análise já foi armazenada; regeneração e entrega não renovam as 24 horas.
+- Perguntas `sobre a conversa:` continuam em texto, com trechos e IDs validados.
+- Payload v2 inclui título, pergunta inicial e conclusões estruturadas. Registros
+  v1 continuam legíveis; o primeiro reenvio analisa e atualiza o payload, sem
+  alterar sua expiração. Falhas de análise, armazenamento, geração e envio são
+  reportadas separadamente. Uma falha ao salvar a análise pode exigir nova análise.
+- O PDF não é salvo no Supabase. Chromium usa um diretório temporário por pedido,
+  removido em sucesso ou erro. O limite é 20 MiB; exceder exige um período menor.
+- O webhook já retorna antes do processamento. Um semáforo permite uma renderização
+  por processo; espera e renderização têm prazo total de 60 segundos. A implantação
+  atual tem uma réplica. Mais réplicas exigirão coordenação para limite global.
+- Chromium/Playwright 1.56.0 é instalado no build Docker. Fontes e licenças OFL estão
+  incluídas em `aisha/chat_export/fonts`. Não há download durante a geração.
+- Conteúdo importado é escapado. JavaScript e service workers estão desativados;
+  a única navegação é respondida internamente com o template controlado. Demais
+  requisições são bloqueadas. A análise não tem ferramentas externas.
+- A entrega valida erros HTTP tanto no upload quanto na requisição de envio à Meta.
+  Aceitação pela API não comprova leitura ou entrega final ao dispositivo.
+
+### Validação reproduzível
+
+`python -m scripts.check_export_pdf /tmp/aisha-pdf-preview` usa apenas dados
+sintéticos: grupo, sistema, acentos, emoji, mídia omitida e mensagem longa. Verifica
+cada linha, nome, data, hora e ID extraído, ordem dos IDs, destinos dos links e
+limpeza dos temporários; grava PDF e imagens para inspeção visual opcional.
+
+Resultado local: seis páginas, aproximadamente 318 kB, menos de um segundo de
+renderização. `child_maxrss` é a métrica de pico dos processos filhos (bytes no
+macOS, KiB no Linux), não uma medida da memória total simultânea do serviço.
+
+`python -m scripts.check_export_live` é opt-in: usa Supabase e OpenAI reais com
+uma conversa sintética e simula download/entrega Meta. Confere armazenamento,
+isolamento, geração, reenvio sem modelo, pergunta posterior e exclusão. Remove o
+registro sintético em `finally`. Pode bloquear o pré-deploy se falhar; requer
+configuração temporária autorizada pelo operador e sua remoção após validar.
+
+A ativação em produção continua condicionada ao sucesso desse teste no container
+Railway e ao health check. Nunca enviar os arquivos locais não versionados no
+build. A flag `WHATSAPP_EXPORT_ENABLED` desativa também o reenvio.

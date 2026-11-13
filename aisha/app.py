@@ -646,7 +646,7 @@ async def handle_chat(sender: str, text: str, msg_id: str = ""):
 
     _processing.add(sender)
     try:
-        if await export_handler.command(sender, text, send_message):
+        if await export_handler.command(sender, text, send_message, send_document):
             return
         if _is_retroactive_transcription_request(text):
             raw = await pop_raw_transcription_async(sender)
@@ -902,7 +902,7 @@ async def handle_document(sender: str, message: dict):
     """Downloads a document from WhatsApp, extracts text, and summarizes it."""
     doc = message["document"]
     if export_handler.is_export(doc):
-        await export_handler.document(sender, doc, http_client, send_message, _processing)
+        await export_handler.document(sender, doc, http_client, send_message, _processing, send_document)
         return
     doc_id = doc["id"]
     mime_type = doc.get("mime_type", "")
@@ -1239,6 +1239,7 @@ async def send_document(to: str, file_bytes: bytes, filename: str, mime_type: st
             "document": {"id": media_id, "filename": filename},
         },
     )
+    resp.raise_for_status()
     _last_reply_time[to] = time.time()
     log.info(f"Document sent to {to}: status={resp.status_code}")
     if resp.status_code != 200:
