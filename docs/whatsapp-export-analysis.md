@@ -120,3 +120,21 @@ configuração temporária autorizada pelo operador e sua remoção após valida
 A ativação em produção continua condicionada ao sucesso desse teste no container
 Railway e ao health check. Nunca enviar os arquivos locais não versionados no
 build. A flag `WHATSAPP_EXPORT_ENABLED` desativa também o reenvio.
+
+### Verificação no Railway em 13/11/2026
+
+A implantação `9f9752bc-00df-4a27-90bc-94db27296264` executou o teste sintético
+com sucesso: geração, armazenamento real, análise real, isolamento, reenvio sem
+nova chamada de análise, pergunta posterior e exclusão. Chromium produziu seis
+páginas / 267.576 bytes em 0,86 s; pico de processo filho 134.772 KiB no Linux.
+
+A primeira tentativa foi bloqueada por autenticação OpenAI inválida na configuração
+de produção. A credencial já existente localmente foi validada e aplicada ao Railway;
+nenhuma credencial foi incorporada ao código ou aos logs deste teste.
+
+O comando temporário de pré-deploy foi removido e a flag foi configurada como
+`true` para a implantação final. A entrega Meta foi simulada: ainda é necessário
+um envio real de ZIP pelo usuário para confirmar o recebimento no aparelho.
+Testes adicionais cobrem fechamento do navegador e limpeza em falha/cancelamento,
+além do bloqueio de requisições externas. As alterações locais anteriores continuam
+fora dos commits desta integração.

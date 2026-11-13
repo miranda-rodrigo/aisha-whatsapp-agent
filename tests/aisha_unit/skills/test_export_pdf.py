@@ -9,6 +9,7 @@ configure_test_env()
 
 from aisha.chat_export import handler, pdf, store  # noqa: E402
 from aisha.chat_export.ingest import ExportError  # noqa: E402
+
 MESSAGES = [
     dict(
         id="msg-a",
