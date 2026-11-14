@@ -44,7 +44,7 @@ async def tool_get_my_profile(args: dict, ctx: ToolContext) -> str:
     from aisha.skills.memory_store import list_memories
     from aisha.skills.reminder_store import get_reminders
     from aisha.skills.scheduled_task_store import get_tasks
-    from datetime import datetime
+    from aisha.skills.reminder import _fmt_reminder_display
 
     async def _safe_memories() -> list[dict]:
         try:
@@ -67,10 +67,9 @@ async def tool_get_my_profile(args: dict, ctx: ToolContext) -> str:
 
     reminder_list = []
     for r in reminders:
-        dt = datetime.fromisoformat(r["scheduled_at"])
         reminder_list.append({
             "message": r["message"],
-            "scheduled_at": dt.isoformat(),
+            "datetime_display": _fmt_reminder_display(r, tz),
             "is_recurring": r.get("is_recurring", False),
         })
 

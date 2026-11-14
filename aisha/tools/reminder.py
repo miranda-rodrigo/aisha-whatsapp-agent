@@ -16,7 +16,14 @@ log = logging.getLogger(__name__)
 async def tool_create_reminder(args: dict, ctx: ToolContext) -> str:
     from aisha.config import REMINDER_LEAD_MINUTES
     from aisha.skills.reminder_store import Reminder, save_reminder, update_job_id
-    from aisha.skills.reminder import _schedule_job, _gcal_link, _fmt_local, _parse_dt_iso
+    from aisha.skills.reminder import (
+        _fmt_local,
+        _fmt_reminder_display,
+        _gcal_link,
+        _next_event_from_cron,
+        _parse_dt_iso,
+        _schedule_job,
+    )
 
     message = args.get("message", "Lembrete")
     datetime_iso = args.get("datetime_iso")
@@ -42,7 +49,14 @@ async def tool_create_reminder(args: dict, ctx: ToolContext) -> str:
         rrule = f"CRON:{cron_expression}"
 
     if not scheduled_at:
-        scheduled_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        if cron_expression:
+            scheduled_at = _next_event_from_cron(cron_expression, ctx.user_tz)
+        if not scheduled_at:
+            log.warning(
+                "Recurring reminder without parseable cron hour/minute; "
+                "falling back to now+1h for scheduled_at"
+            )
+            scheduled_at = datetime.now(timezone.utc) + timedelta(hours=1)
 
     reminder = Reminder(
         phone=ctx.phone,
@@ -67,7 +81,10 @@ async def tool_create_reminder(args: dict, ctx: ToolContext) -> str:
     )
     await update_job_id(reminder_id, job_id)
 
-    event_display = _fmt_local(scheduled_at, ctx.user_tz)
+    event_display = _fmt_reminder_display(
+        {"rrule": rrule, "scheduled_at": scheduled_at, "timezone": ctx.user_tz},
+        ctx.user_tz,
+    )
     gcal = _gcal_link(message, scheduled_at, ctx.user_tz)
 
     return json.dumps({
@@ -83,7 +100,7 @@ async def tool_create_reminder(args: dict, ctx: ToolContext) -> str:
 
 async def tool_list_reminders(args: dict, ctx: ToolContext) -> str:
     from aisha.skills.reminder_store import get_reminders
-    from aisha.skills.reminder import _fmt_local
+    from aisha.skills.reminder import _fmt_reminder_display
 
     rows = await get_reminders(ctx.phone)
     if not rows:
@@ -91,11 +108,10 @@ async def tool_list_reminders(args: dict, ctx: ToolContext) -> str:
 
     reminders = []
     for i, row in enumerate(rows, 1):
-        dt_utc = datetime.fromisoformat(row["scheduled_at"])
         reminders.append({
             "number": i,
             "message": row["message"],
-            "datetime_display": _fmt_local(dt_utc, row.get("timezone") or ctx.user_tz),
+            "datetime_display": _fmt_reminder_display(row, ctx.user_tz),
             "is_recurring": row.get("is_recurring", False),
         })
 
