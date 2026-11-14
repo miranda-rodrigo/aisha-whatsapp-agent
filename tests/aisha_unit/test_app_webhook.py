@@ -140,6 +140,20 @@ class WebhookSecurityTests(unittest.IsolatedAsyncioTestCase):
             "Tipo 'sticker' ainda não suportado.",
         )
 
+    async def test_process_webhook_routes_video(self):
+        body = webhook_body(msg_type="video")
+
+        with (
+            patch.object(app, "ALLOWED_NUMBERS", {"5511999999999"}),
+            patch.object(app, "handle_video", AsyncMock()) as handle_video,
+        ):
+            await app._process_webhook(body)
+
+        handle_video.assert_awaited_once()
+        message = handle_video.await_args.args[1]
+        self.assertEqual(message["type"], "video")
+        self.assertEqual(message["video"]["id"], "media-1")
+
     async def test_process_webhook_routes_location(self):
         body = {
             "entry": [

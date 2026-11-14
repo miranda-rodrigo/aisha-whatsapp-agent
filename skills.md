@@ -32,7 +32,7 @@ Aisha: Não tenho essa habilidade.
 
 ---
 
-## 2. Transcrição de Áudio
+## 2. Transcrição de Áudio e Vídeo
 
 Envie um áudio **sem mencionar "Aisha"** e ele será transcrito, limpo e devolvido como texto.
 
@@ -47,6 +47,24 @@ Envie um áudio **sem mencionar "Aisha"** e ele será transcrito, limpo e devolv
 **Observações:**
 - Áudios longos são divididos automaticamente em partes de 10 minutos e processados em paralelo
 - Formatos suportados: OGG, MP3, M4A, WAV, MP4
+
+### Vídeo do WhatsApp
+
+Envie um **vídeo** (ou o arquivo `.mp4` como documento) para transcrever a faixa de áudio.
+
+**Como usar:**
+- Envie o vídeo no chat — a Aisha transcreve automaticamente
+- Vídeos longos voltam como prévia + arquivo `.txt`, igual áudio longo
+
+**Limites do WhatsApp:**
+- Enviado como *vídeo*: a API baixa no máximo **16 MB**. Acima disso, o download falha.
+- Enviado como *documento* (anexo/arquivo): até **100 MB**
+- Se o vídeo for grande demais como vídeo, reenvie como documento ou extraia o áudio
+
+**Observações:**
+- Só a faixa de áudio é transcrita (Whisper). Vídeo sem áudio é recusado.
+- Formatos: MP4, 3GP, WebM, MOV
+- Áudio do WhatsApp, vídeo do WhatsApp e vídeo do YouTube são skills diferentes; as três existem.
 
 ---
 
@@ -63,7 +81,7 @@ Envie um áudio **mencionando "Aisha"** para conversar com ela por voz.
 
 A palavra "Aisha" em qualquer parte do áudio indica que é uma conversa, não uma transcrição.
 
-**YouTube também entra aqui:** se você pediu transcrição e em seguida mandar um link do YouTube, a Aisha transcreve o vídeo (não pergunta de novo). Áudio do WhatsApp e vídeo do YouTube são skills diferentes; as duas existem.
+**YouTube também entra aqui:** se você pediu transcrição e em seguida mandar um link do YouTube, a Aisha transcreve o vídeo (não pergunta de novo). Áudio do WhatsApp, vídeo do WhatsApp e vídeo do YouTube são skills diferentes; as três existem.
 
 ---
 
@@ -332,7 +350,7 @@ Se o link chega sem contexto, ela pergunta o que fazer.
 
 ```
 Você: você tem skill de transcrição?
-Aisha: Sim — áudio do WhatsApp ou vídeo do YouTube.
+Aisha: Sim — áudio do WhatsApp, vídeo do WhatsApp ou vídeo do YouTube.
 Você: https://youtu.be/dQw4w9WgXcQ
 Aisha: [transcrição do vídeo]
 
@@ -487,7 +505,7 @@ A Aisha escolhe automaticamente o melhor modelo para cada tarefa — você não 
 | Saudações | `gpt-5.6-luna` em Fast mode |
 | Pesquisa, raciocínio, tarefas complexas | `gpt-5.6-sol` em Fast mode |
 | Geração e edição de imagem | `gpt-5.6-sol` em Fast mode + `image_generation` |
-| Transcrição de áudio | `whisper-1` |
+| Transcrição de áudio e vídeo do WhatsApp | `whisper-1` (vídeo: extrai áudio com ffmpeg) |
 | Refinamento de transcrição | `gpt-5.6-luna` com `reasoning.effort=none` |
 | Extração estruturada e intenção de lembrete / tarefa | `gpt-5.6-sol` em Fast mode |
 | Execução de tarefa agendada (web e/ou X) | `gpt-5.6-sol` em Fast mode + `search_x` quando o assunto é o X |

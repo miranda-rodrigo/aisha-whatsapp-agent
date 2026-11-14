@@ -117,6 +117,73 @@ class TranscribeCommandTests(TestCase):
         self.assertEqual(transcribe_file.call_args.args[1].suffix, ".mp3")
 
 
+class TranscribeVideoDetectionTests(TestCase):
+    def test_is_transcribable_video_accepts_mime_and_filename(self):
+        self.assertTrue(transcribe.is_transcribable_video("video/mp4"))
+        self.assertTrue(transcribe.is_transcribable_video("video/mp4; codecs=avc1"))
+        self.assertTrue(transcribe.is_transcribable_video("video/3gpp"))
+        self.assertTrue(
+            transcribe.is_transcribable_video(
+                "application/octet-stream", "reuniao.mp4"
+            )
+        )
+        self.assertFalse(transcribe.is_transcribable_video("application/pdf"))
+        self.assertFalse(
+            transcribe.is_transcribable_video("application/octet-stream", "ata.docx")
+        )
+
+    def test_ext_for_mime_strips_codecs_and_uses_filename(self):
+        self.assertEqual(transcribe._ext_for_mime("video/3gpp"), ".3gp")
+        self.assertEqual(
+            transcribe._ext_for_mime("application/octet-stream", "clip.mov"),
+            ".mov",
+        )
+        self.assertEqual(transcribe._ext_for_mime("audio/ogg; codecs=opus"), ".ogg")
+
+    def test_video_mp4_always_extracts_audio_even_when_small(self):
+        def fake_convert(_source, destination):
+            destination.write_bytes(b"mp3")
+
+        with (
+            patch.object(transcribe, "_client") as client,
+            patch.object(
+                transcribe,
+                "_probe_media",
+                return_value={"has_audio": True, "has_video": True, "duration": 12},
+            ),
+            patch.object(transcribe, "_convert_to_mp3", side_effect=fake_convert) as convert,
+            patch.object(transcribe, "_should_send_raw", return_value=True),
+            patch.object(
+                transcribe, "_transcribe_file", return_value="fala"
+            ) as transcribe_file,
+            patch.object(transcribe, "_split_audio") as split,
+        ):
+            result = transcribe._transcribe_sync(b"mp4-bytes", "video/mp4")
+
+        self.assertEqual(result, "fala")
+        convert.assert_called_once()
+        split.assert_not_called()
+        transcribe_file.assert_called_once()
+        self.assertIs(transcribe_file.call_args.args[0], client)
+        self.assertEqual(transcribe_file.call_args.args[1].suffix, ".mp3")
+
+    def test_video_without_audio_raises(self):
+        with (
+            patch.object(
+                transcribe,
+                "_probe_media",
+                return_value={"has_audio": False, "has_video": True, "duration": 8},
+            ),
+            patch.object(transcribe, "_convert_to_mp3") as convert,
+            patch.object(transcribe, "_transcribe_file") as transcribe_file,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "não tem faixa de áudio"):
+                transcribe._transcribe_sync(b"mp4", "video/mp4")
+
+        convert.assert_not_called()
+        transcribe_file.assert_not_called()
+
+
 class TranscribeAsyncTests(IsolatedAsyncioTestCase):
     async def test_async_wrapper_delegates_to_thread(self):
         to_thread = AsyncMock(return_value="transcrição")
@@ -128,5 +195,5 @@ class TranscribeAsyncTests(IsolatedAsyncioTestCase):
 
         self.assertEqual(result, "transcrição")
         to_thread.assert_awaited_once_with(
-            transcribe._transcribe_sync, b"bytes", "audio/ogg"
+            transcribe._transcribe_sync, b"bytes", "audio/ogg", ""
         )
