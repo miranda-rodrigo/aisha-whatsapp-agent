@@ -126,6 +126,17 @@ class WebhookSecurityTests(unittest.IsolatedAsyncioTestCase):
 
         handle_chat.assert_not_awaited()
 
+    async def test_process_webhook_allows_br_number_with_extra_nine(self):
+        body = webhook_body(sender="5585999065040", msg_id="br-9")
+
+        with (
+            patch.object(app, "ALLOWED_NUMBERS", {"558599065040"}),
+            patch.object(app, "handle_chat", AsyncMock()) as handle_chat,
+        ):
+            await app._process_webhook(body)
+
+        handle_chat.assert_awaited_once_with("5585999065040", "olá", "br-9")
+
     async def test_process_webhook_sends_fallback_for_unsupported_type(self):
         body = webhook_body(msg_type="sticker")
 
