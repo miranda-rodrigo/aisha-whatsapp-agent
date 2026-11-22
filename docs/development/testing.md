@@ -12,3 +12,5 @@ O runner `python -m scripts.run_tests` substitui credenciais por valores fictíc
 Para inspecionar PDF: `python -m scripts.check_export_pdf /tmp/aisha-pdf-preview`. Testes `check_export_live` e `check_export_media --live` são opt-in, usam provedores reais e não fazem parte da suíte padrão. Execute-os apenas no ambiente explicitamente escolhido.
 
 Conversas reais ficam em `local/`, nunca em fixtures ou `apps/website/public`. O playground permite `--question`, `--ai`, `--env-file`, `--output` e `--no-pdf`. O modo offline não precisa de nenhuma credencial.
+
+As dependências diretas dos pacotes são fixadas nas versões verificadas. Atualizações devem vir em PR separado e passar pelo mesmo CI; Ubuntu 24.04 é fixado por compatibilidade com Chromium.
