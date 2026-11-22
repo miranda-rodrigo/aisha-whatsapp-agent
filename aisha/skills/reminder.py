@@ -166,7 +166,7 @@ def _fmt_local(dt_utc: datetime, user_tz: str) -> str:
 
 
 async def _extract(text: str, user_tz: str) -> ReminderExtraction:
-    """Call gpt-4o-mini with structured output to extract reminder intent."""
+    """Call EXTRACT_MODEL with structured output to extract reminder intent."""
     response = await _client.beta.chat.completions.parse(
         model=EXTRACT_MODEL,
         service_tier=OPENAI_SERVICE_TIER,
@@ -175,7 +175,6 @@ async def _extract(text: str, user_tz: str) -> ReminderExtraction:
             {"role": "user", "content": text},
         ],
         response_format=ReminderExtraction,
-        temperature=0,
     )
     return response.choices[0].message.parsed
 

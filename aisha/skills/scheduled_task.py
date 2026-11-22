@@ -132,7 +132,7 @@ def is_scheduled_task_intent(text: str) -> bool:
 
 
 async def _extract(text: str, user_tz: str) -> TaskExtraction:
-    """Call gpt-4o-mini with structured output to extract task intent."""
+    """Call EXTRACT_MODEL with structured output to extract task intent."""
     response = await _client.beta.chat.completions.parse(
         model=EXTRACT_MODEL,
         service_tier=OPENAI_SERVICE_TIER,
@@ -141,7 +141,6 @@ async def _extract(text: str, user_tz: str) -> TaskExtraction:
             {"role": "user", "content": text},
         ],
         response_format=TaskExtraction,
-        temperature=0,
     )
     return response.choices[0].message.parsed
 

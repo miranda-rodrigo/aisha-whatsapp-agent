@@ -44,25 +44,45 @@ class ChatPureTests(unittest.TestCase):
         delegate.assert_called_once_with("novo assunto")
 
 
+def _assert_short_completion(test, kwargs, max_completion_tokens):
+    test.assertEqual(kwargs["model"], "gpt-5.6-sol")
+    test.assertEqual(kwargs["service_tier"], "fast")
+    test.assertEqual(kwargs["max_completion_tokens"], max_completion_tokens)
+    test.assertNotIn("max_tokens", kwargs)
+    test.assertNotIn("temperature", kwargs)
+
+
 class ChatAsyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_classificadores_normalizam_e_usam_fallback(self):
         response = namespace(
             choices=[namespace(message=namespace(content="scheduled-task extra"))]
         )
-        with patch.object(
-            chat._client.chat.completions, "create", AsyncMock(return_value=response)
-        ):
+        create = AsyncMock(return_value=response)
+        with patch.object(chat._client.chat.completions, "create", create):
             self.assertEqual(await chat.classify("agende"), "SCHEDULED_TASK")
+        _assert_short_completion(self, create.await_args.kwargs, 5)
 
         invalid = namespace(choices=[namespace(message=namespace(content="desconhecido"))])
-        with patch.object(
-            chat._client.chat.completions, "create", AsyncMock(return_value=invalid)
-        ):
+        create = AsyncMock(return_value=invalid)
+        with patch.object(chat._client.chat.completions, "create", create):
             self.assertEqual(await chat.classify("texto"), "COMPLEX")
             self.assertEqual(
                 await chat.classify_pending_response("texto", "aguardando horário"),
                 "CONTINUE",
             )
+        self.assertEqual(create.await_count, 2)
+        for call in create.await_args_list:
+            _assert_short_completion(self, call.kwargs, 5)
+
+    async def test_detect_self_action_nao_envia_temperature(self):
+        parsed = chat.SelfAction(action="skills")
+        response = namespace(choices=[namespace(message=namespace(parsed=parsed))])
+        parse = AsyncMock(return_value=response)
+        with patch.object(chat._client.beta.chat.completions, "parse", parse):
+            result = await chat._detect_self_action("o que você sabe fazer?")
+        self.assertEqual(result.action, "skills")
+        self.assertNotIn("temperature", parse.await_args.kwargs)
+        self.assertNotIn("max_tokens", parse.await_args.kwargs)
 
     async def test_chat_obtem_perfil_e_delega_rota(self):
         with patch("aisha.user_profile.get_profile", AsyncMock(return_value={"language": "pt"})), patch.object(

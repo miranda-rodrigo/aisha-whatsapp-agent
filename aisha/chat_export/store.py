@@ -10,7 +10,7 @@ from aisha.supabase_http import HEADERS, get_client
 from .ingest import ExportError
 
 KIND = "wa_export"
-TTL_SECONDS = 86400
+TTL_SECONDS = 3600
 # Single-process service: serialize deletion with media publication.
 guards = defaultdict(asyncio.Lock)
 _URL = f"{SUPABASE_URL}/rest/v1/pending_states"
@@ -27,8 +27,9 @@ async def save(
     title: str = "Conversa WhatsApp",
     question: str = "",
     metadata: dict | None = None,
+    received_at: datetime | None = None,
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = received_at or datetime.now(timezone.utc)
     try:
         response = await get_client().post(
             _URL,
@@ -81,7 +82,12 @@ async def load_record(phone: str) -> dict | None:
             return None
         row = rows[0]
         if datetime.fromisoformat(row["expires_at"]) <= datetime.now(timezone.utc):
-            await forget(phone)
+            expired = await get_client().delete(
+                _URL,
+                headers=HEADERS,
+                params={**_params(phone), "expires_at": "eq." + row["expires_at"]},
+            )
+            expired.raise_for_status()
             return None
         payload = row["payload"]
         if payload.get("version") not in (1, 2, 3) or not isinstance(
@@ -104,6 +110,7 @@ async def load(phone: str) -> list[dict] | None:
 
 async def save_analysis(phone: str, record: dict, analysis: dict) -> None:
     """Keep original expiration and avoid overwriting a newer upload."""
+    ensure_unexpired(record)
     payload = {k: v for k, v in record.items() if k != "expires_at"}
     payload.update(version=max(2, record.get("version", 1)), analysis=analysis)
     try:
@@ -141,6 +148,7 @@ async def current(phone, record):
 
 async def update(phone, record):
     """Compare-and-set: never recreate a deleted or replaced conversation."""
+    ensure_unexpired(record)
     payload = {k: v for k, v in record.items() if k != "expires_at"}
     response = await get_client().patch(
         _URL,
@@ -195,3 +203,8 @@ async def cleanup_expired():
                 params={**_params(phone), "expires_at": "eq." + row["expires_at"]},
             )
             deleted.raise_for_status()
+
+
+def ensure_unexpired(record):
+    if datetime.fromisoformat(record["expires_at"]) <= datetime.now(timezone.utc):
+        raise ExportError("A conversa expirou. Envie o ZIP novamente.")

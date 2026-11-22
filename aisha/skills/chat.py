@@ -151,19 +151,33 @@ def wants_new_session(text: str) -> bool:
 _VALID_LABELS = {"SCHEDULED_TASK", "REMINDER", "SELF", "SIMPLE", "COMPLEX"}
 
 
-async def classify(user_input: str) -> str:
-    """Classify intent using gpt-4.1-mini. Returns one of the _VALID_LABELS."""
+async def complete_short(
+    messages: list[dict],
+    *,
+    max_completion_tokens: int,
+    model: str = EXTRACT_MODEL,
+) -> str:
+    """Chat Completions curta para gpt-5.6-sol. Sem max_tokens e sem temperature."""
     response = await _client.chat.completions.create(
-        model=_CLASSIFIER_MODEL,
+        model=model,
         service_tier=OPENAI_SERVICE_TIER,
-        messages=[
+        messages=messages,
+        max_completion_tokens=max_completion_tokens,
+    )
+    return (response.choices[0].message.content or "").strip()
+
+
+async def classify(user_input: str) -> str:
+    """Classify intent using EXTRACT_MODEL. Returns one of the _VALID_LABELS."""
+    label = await complete_short(
+        [
             {"role": "system", "content": _CLASSIFIER_PROMPT},
             {"role": "user", "content": user_input},
         ],
-        max_tokens=5,
-        temperature=0,
+        model=_CLASSIFIER_MODEL,
+        max_completion_tokens=5,
     )
-    label = response.choices[0].message.content.strip().upper().replace("-", "_")
+    label = label.upper().replace("-", "_")
     for valid in _VALID_LABELS:
         if label.startswith(valid):
             return valid
@@ -190,17 +204,15 @@ _VALID_PENDING_LABELS = {"CONTINUE", "CANCEL", "NEW_INTENT"}
 async def classify_pending_response(user_input: str, pending_description: str) -> str:
     """Classify user message against an active pending state. Returns CONTINUE, CANCEL, or NEW_INTENT."""
     prompt = _PENDING_CLASSIFIER_PROMPT.format(pending_description=pending_description)
-    response = await _client.chat.completions.create(
-        model=_CLASSIFIER_MODEL,
-        service_tier=OPENAI_SERVICE_TIER,
-        messages=[
+    label = await complete_short(
+        [
             {"role": "system", "content": prompt},
             {"role": "user", "content": user_input},
         ],
-        max_tokens=5,
-        temperature=0,
+        model=_CLASSIFIER_MODEL,
+        max_completion_tokens=5,
     )
-    label = response.choices[0].message.content.strip().upper().replace("-", "_")
+    label = label.upper().replace("-", "_")
     for valid in _VALID_PENDING_LABELS:
         if label.startswith(valid):
             return valid
@@ -299,7 +311,6 @@ async def _detect_self_action(user_input: str) -> SelfAction:
             {"role": "user", "content": user_input},
         ],
         response_format=SelfAction,
-        temperature=0,
     )
     return response.choices[0].message.parsed
 

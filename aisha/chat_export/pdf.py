@@ -9,6 +9,7 @@ from pathlib import Path
 from .analysis import validate_analysis
 from .ingest import ExportError
 from .parser import parse_chat
+from .presentation import commentary, guide, media_blocks
 
 MAX_PDF_BYTES = 20 * 1024 * 1024
 RENDER_TIMEOUT = 60
@@ -62,12 +63,13 @@ def template(messages: list[dict], analysis: dict, title: str) -> str:
         )
         note = (
             '<div class="media">Mídia não processada nesta versão.</div>'
-            if marker
+            if marker and not m.get("media")
             else ""
         )
         parts.append(
-            f'<article class="{klass}" id="{esc(m["id"])}"><div class="who">{esc(m["sender"])} <span class="time">{esc(m["date"])} · {esc(m["time"])}</span></div><div class="text">{esc(m["text"])}</div>{note}<div class="stamp">{esc(m["id"])}</div></article>'
+            f'<article class="{klass}" id="{esc(m["id"])}"><div class="who">{esc(m["sender"])} <span class="time">{esc(m["date"])} · {esc(m["time"])}</span></div><div class="text">{esc(m["text"])}</div>{note}{media_blocks(m)}<div class="stamp">{esc(m["id"])}</div></article>'
         )
+        parts.append(commentary(m, analysis, messages))
     period = (
         f"{messages[0]['date']} a {messages[-1]['date']}"
         if messages
@@ -98,9 +100,21 @@ a,.refs,.stamp {{ font:7.5pt Mono,monospace; color:#8a6a32; overflow-wrap:anywhe
 .stamp {{ margin-top:7px; break-before:avoid; }}
 .mine .stamp {{ color:#e4c98a; }}
 .media {{ font-size:8pt; background:#f6e8e2; color:#6e3428; padding:5px; margin-top:5px; }}
+.coverage {{ margin:18px 0; padding:12px 0; border-top:2px solid #d7b56d; border-bottom:1px solid #d5dee8; font-size:9pt; color:#1d4e89; }}
+.guide h2 {{ font-size:12pt; margin:0 0 8px; }}
+.guide p,.guide li {{ margin:7px 0; }}
+.ai-guide {{ background:#f7f4eb; border-left:3px solid #d7b56d; }}
+.attachment {{ break-inside:avoid; margin-top:12px; padding:12px; background:#fff; color:#1c2430; border:1px solid #d5dee8; border-radius:7px; }}
+.source-label {{ font:8pt Mono,monospace; color:#6d5426; margin-bottom:7px; break-after:avoid; }}
+.attachment-name {{ break-after:avoid; font-size:8pt; overflow-wrap:anywhere; margin-bottom:8px; }}
+.photo {{ display:block; max-width:100%; max-height:155mm; width:auto; height:auto; margin:10px auto; object-fit:contain; break-inside:avoid; break-after:avoid; }}
+.source-caption {{ font-size:7pt; color:#5c6b7a; overflow-wrap:anywhere; margin-top:8px; }}
+.commentary {{ margin:14px 0; padding:12px 16px; border-left:3px solid #b99852; background:#f7f4eb; color:#384652; font-size:9pt; break-inside:avoid; }}
+.commentary p {{ margin:6px 0; }}
+.warning {{ color:#843d2b; }}
 .system {{ color:#5c6b7a; font-size:8pt; padding:10px; text-align:center; }}
 </style></head><body><header><div class="brand">AISHA · CONVERSA ANALISADA</div><h1>{esc(title)}</h1><div class="meta">{esc(period)} · {len(messages)} mensagens<br>{esc(" · ".join(participants))}</div></header>
-<div class="guide"><b>Análise somente do texto.</b> Áudios, imagens e PDFs não foram processados. Balões azuis representam o primeiro participante, não necessariamente quem enviou o ZIP à Aisha. Referências apontam às mensagens originais. A interpretação da IA pode conter erros; confira as fontes.</div>
+{guide(messages, analysis)}
 <h2>Análise · interpretação da IA</h2><section class="analysis"><ul>{summary}</ul></section>
 <section class="timeline"><h2>Conversa · mensagens originais</h2>{"".join(parts)}</section></body></html>"""
 

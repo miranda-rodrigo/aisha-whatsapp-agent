@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import parse_qs, urlparse
 
-from tests.aisha_unit._helpers import configure_test_env
+from tests.aisha_unit._helpers import configure_test_env, namespace
 
 configure_test_env()
 
@@ -73,6 +73,17 @@ class ReminderPureTests(unittest.TestCase):
 
 
 class ReminderAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_extract_nao_envia_temperature(self):
+        parsed = reminder.ReminderExtraction(action="list")
+        response = namespace(choices=[namespace(message=namespace(parsed=parsed))])
+        parse = AsyncMock(return_value=response)
+        with patch.object(reminder._client.beta.chat.completions, "parse", parse):
+            result = await reminder._extract("quais lembretes", "America/Fortaleza")
+        self.assertEqual(result.action, "list")
+        self.assertEqual(parse.await_args.kwargs["model"], "gpt-5.6-sol")
+        self.assertNotIn("temperature", parse.await_args.kwargs)
+        self.assertNotIn("max_tokens", parse.await_args.kwargs)
+
     async def test_resolve_prefere_iso_e_recua_para_texto(self):
         expected = datetime(2030, 1, 1, tzinfo=timezone.utc)
         with patch.object(reminder, "_parse_dt_iso", return_value=expected) as parse_iso, patch.object(

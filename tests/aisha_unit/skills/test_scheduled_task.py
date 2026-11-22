@@ -67,6 +67,17 @@ class ScheduledTaskPureTests(unittest.TestCase):
 
 
 class ScheduledTaskAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_extract_nao_envia_temperature(self):
+        parsed = scheduled_task.TaskExtraction(action="list")
+        response = namespace(choices=[namespace(message=namespace(parsed=parsed))])
+        parse = AsyncMock(return_value=response)
+        with patch.object(scheduled_task._client.beta.chat.completions, "parse", parse):
+            result = await scheduled_task._extract("quais tarefas", "America/Fortaleza")
+        self.assertEqual(result.action, "list")
+        self.assertEqual(parse.await_args.kwargs["model"], "gpt-5.6-sol")
+        self.assertNotIn("temperature", parse.await_args.kwargs)
+        self.assertNotIn("max_tokens", parse.await_args.kwargs)
+
     async def test_handle_delega_conforme_acao(self):
         scheduler = MagicMock()
         cases = [

@@ -13,6 +13,7 @@ XAI_SEARCH_MODEL = "grok-4.6"
 DOCUMENT_MODEL = "gpt-5.6-sol"
 VISION_OCR_MODEL = "gpt-5.6-sol"
 EXTRACT_MODEL = "gpt-5.6-sol"
+# Chat Completions nesses modelos usa max_completion_tokens e não envia temperature.
 OPENAI_SERVICE_TIER = "fast"
 EMBEDDING_MODEL = "text-embedding-3-small"
 WHISPER_MODEL = "whisper-1"

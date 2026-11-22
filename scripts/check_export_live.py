@@ -42,7 +42,7 @@ async def main():
 
     send, send_file = AsyncMock(), AsyncMock()
     try:
-        with patch.dict(os.environ, WHATSAPP_EXPORT_ENABLED="true"):
+        with patch.dict(os.environ, WHATSAPP_EXPORT_ENABLED="true", WHATSAPP_EXPORT_MEDIA_ENABLED="false"):
             async with httpx.AsyncClient(
                 transport=httpx.MockTransport(respond)
             ) as client:

@@ -1,11 +1,24 @@
 """Private reduced images only; no audio, ZIP or PDF persistence."""
 
 import hashlib
+import os
 import re
 import time
 
 from aisha.config import SUPABASE_URL
-from aisha.supabase_http import HEADERS, get_client
+from aisha.supabase_http import HEADERS as DATABASE_HEADERS
+from aisha.supabase_http import get_client
+
+_storage_key = os.getenv("SUPABASE_STORAGE_KEY")
+HEADERS = (
+    {
+        **DATABASE_HEADERS,
+        "apikey": _storage_key,
+        "Authorization": "Bearer " + _storage_key,
+    }
+    if _storage_key
+    else DATABASE_HEADERS
+)
 
 BUCKET = "whatsapp-export-images"
 ROOT = f"{SUPABASE_URL}/storage/v1"
@@ -61,7 +74,10 @@ async def entries(prefix):
                 "sortBy": {"column": "name", "order": "asc"},
             },
         )
-        if response.status_code == 404:
+        if response.status_code == 404 or (
+            response.status_code == 400
+            and response.json().get("code") == "NoSuchBucket"
+        ):
             return []
         response.raise_for_status()
         page = response.json()

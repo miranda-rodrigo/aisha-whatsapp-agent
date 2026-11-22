@@ -196,7 +196,6 @@ async def summarize_document(
             {"role": "system", "content": _SUMMARIZE_PROMPT},
             {"role": "user", "content": user_message},
         ],
-        temperature=0.3,
     )
     return response.choices[0].message.content.strip()
 

@@ -191,3 +191,63 @@ class EnrichmentTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(text, html)
         self.assertNotIn("Não deve aparecer", html)
         self.assertNotIn("<script>", html)
+
+    async def test_transient_retry_is_bounded(self):
+        import httpx
+        from openai import APIConnectionError
+
+        failure = APIConnectionError(
+            request=httpx.Request(
+                "POST", "https://api.openai.com/v1/audio/transcriptions"
+            )
+        )
+        call = AsyncMock(side_effect=[failure, failure, "ok"])
+        with patch.object(enrich.asyncio, "sleep", AsyncMock()):
+            self.assertEqual(await enrich.retry(call), "ok")
+        self.assertEqual(call.await_count, 3)
+
+    async def test_cleanup_only_expired_owned_prefixes(self):
+        root = "a" * 64
+
+        async def listing(prefix):
+            if not prefix:
+                return [{"name": root}, {"name": "unrelated"}]
+            return [{"name": "1-" + "b" * 32}, {"name": "9999999999-" + "c" * 32}]
+
+        with (
+            patch.object(assets, "entries", listing),
+            patch.object(assets, "remove_prefix", AsyncMock()) as remove,
+        ):
+            await assets.cleanup()
+            remove.assert_awaited_once_with(root + "/1-" + "b" * 32)
+
+    async def test_subprocess_cancelled_before_temp_removal(self):
+        import tempfile
+        from pathlib import Path
+
+        before = set(Path(tempfile.gettempdir()).glob("aisha-audio-*"))
+        process = AsyncMock()
+        process.returncode = None
+        from unittest.mock import Mock
+
+        process.kill = Mock()
+        entered = asyncio.Event()
+
+        async def waiting():
+            entered.set()
+            if process.kill.called:
+                process.returncode = -9
+                return
+            await asyncio.sleep(60)
+
+        process.wait.side_effect = waiting
+        with patch.object(
+            enrich.asyncio, "create_subprocess_exec", AsyncMock(return_value=process)
+        ):
+            task = asyncio.create_task(enrich.transcribe(b"audio", ".wav", 1))
+            await entered.wait()
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        process.kill.assert_called_once()
+        self.assertEqual(set(Path(tempfile.gettempdir()).glob("aisha-audio-*")), before)

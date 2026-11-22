@@ -15,6 +15,21 @@ import aisha.skills.youtube as youtube
 
 
 class HandlerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_resolve_tz_usa_max_completion_tokens(self):
+        from aisha.skills import chat
+
+        response = namespace(choices=[namespace(message=namespace(content=" America/Fortaleza "))])
+        create = AsyncMock(return_value=response)
+        with patch.object(chat._client.chat.completions, "create", create):
+            self.assertEqual(await app._resolve_tz_from_text("Fortaleza"), "America/Fortaleza")
+        kwargs = create.await_args.kwargs
+        self.assertEqual(kwargs["max_completion_tokens"], 30)
+        self.assertNotIn("max_tokens", kwargs)
+        self.assertNotIn("temperature", kwargs)
+
+        unknown = namespace(choices=[namespace(message=namespace(content="unknown"))])
+        with patch.object(chat._client.chat.completions, "create", AsyncMock(return_value=unknown)):
+            self.assertIsNone(await app._resolve_tz_from_text("lugar nenhum"))
     def setUp(self):
         self._clear_globals()
 

@@ -16,18 +16,22 @@ from apscheduler import AsyncScheduler
 from apscheduler.datastores.sqlalchemy import SQLAlchemyDataStore
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
-from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from aisha.chat_export import handler as export_handler
 
-from aisha.skills.chat import chat_with_webpage, classify, classify_pending_response, wants_new_session
+from aisha.skills.chat import (
+    chat_with_webpage,
+    classify,
+    classify_pending_response,
+    complete_short,
+    wants_new_session,
+)
 from aisha.config import (
     ALLOWED_NUMBERS,
     BASE_URL,
     DATABASE_PASSWORD,
     GRAPH_API_URL,
-    OPENAI_API_KEY,
     SUPABASE_URL,
     WEBHOOK_VERIFY_TOKEN,
     WHATSAPP_APP_SECRET,
@@ -35,7 +39,6 @@ from aisha.config import (
 )
 from aisha.messaging import split_whatsapp_text, typing_indicator_payload
 from aisha.supabase_http import aclose as aclose_supabase_client
-from aisha.models import EXTRACT_MODEL, OPENAI_SERVICE_TIER
 from aisha.routing import (
     contains_aisha as _contains_aisha,
     is_download_intent as _is_download_intent,
@@ -144,7 +147,6 @@ log = logging.getLogger(__name__)
 
 http_client: httpx.AsyncClient
 scheduler: AsyncScheduler
-_openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 _background_tasks: set[asyncio.Task] = set()
 LONG_TRANSCRIPTION_WORD_LIMIT = 500
 TRANSCRIPTION_PREVIEW_WORDS = 60
@@ -225,6 +227,8 @@ async def lifespan(app: FastAPI):
     )
 
     cleanup_task = asyncio.create_task(_periodic_download_cleanup())
+    export_handler.cleanup_temp_files()
+    media_cleanup_task = asyncio.create_task(export_handler.cleanup_media())
 
     engine = create_async_engine(
         _DB_URL,
@@ -254,6 +258,8 @@ async def lifespan(app: FastAPI):
         yield
 
     cleanup_task.cancel()
+    media_cleanup_task.cancel()
+    await asyncio.gather(media_cleanup_task, return_exceptions=True)
     await http_client.aclose()
     await aclose_supabase_client()
     await aclose_whatsapp_client()
@@ -403,18 +409,14 @@ Do not include any explanation."""
 
 async def _resolve_tz_from_text(text: str) -> str | None:
     """Ask the LLM to resolve a city/country name to an IANA timezone. Returns None if unresolvable."""
-    resp = await _openai_client.chat.completions.create(
-        model=EXTRACT_MODEL,
-        service_tier=OPENAI_SERVICE_TIER,
-        messages=[
+    result = await complete_short(
+        [
             {"role": "system", "content": _TZ_RESOLVE_SYSTEM},
             {"role": "user", "content": text},
         ],
-        temperature=0,
-        max_tokens=30,
+        max_completion_tokens=30,
     )
-    result = resp.choices[0].message.content.strip()
-    return None if result.lower() == "unknown" else result
+    return None if not result or result.lower() == "unknown" else result
 
 
 async def get_or_ask_timezone(
@@ -635,6 +637,10 @@ async def _hydrate_pendings(sender: str) -> None:
 async def handle_chat(sender: str, text: str, msg_id: str = ""):
     """Routes a text message through pending states or the agentic loop."""
     from aisha.agent import run_agent, run_fast_path
+
+    if text.strip().casefold() == "esquecer conversa":
+        await export_handler.command(sender, text, send_message, send_document)
+        return
 
     if sender in _processing:
         log.info(f"User {sender} sent message while agent is busy — replying with wait message")

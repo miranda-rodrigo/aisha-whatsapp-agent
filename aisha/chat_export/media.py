@@ -8,6 +8,7 @@ import os
 import stat
 import subprocess
 import tempfile
+import time
 import warnings
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -15,7 +16,7 @@ from pathlib import Path, PurePosixPath
 from PIL import Image, ImageOps
 
 from .ingest import ExportError, ingest_zip
-from .parser import AND_ATTACH_RE, IOS_ATTACH_RE
+from .parser import AND_ATTACH_RE, IOS_ATTACH_RE, parse_chat
 
 MAX_AUDIO = int(os.getenv("EXPORT_MAX_AUDIO_FILES", "200"))
 MAX_SECONDS = int(os.getenv("EXPORT_MAX_AUDIO_SECONDS", "3600"))
@@ -105,6 +106,7 @@ def probe_audio(raw, suffix):
 
 def prepare(data):
     """Validate every supported attachment before paid calls. Return metadata + bytes."""
+    deadline = time.monotonic() + 120
     messages = ingest_zip(data)
     assets = {}
     counts = {"audio": 0, "image": 0}
@@ -121,7 +123,25 @@ def prepare(data):
                 message["text"]
             )
             message["media"] = []
+            parsed = parse_chat(
+                f"[{message['date']}, {message['time']}] {message['sender']}: {message['text']}"
+            )
+            if not names and parsed.messages:
+                for kind in parsed.messages[0].omitted_media:
+                    item = {
+                        "kind": kind,
+                        "name": "Mídia omitida na exportação",
+                        "status": "missing",
+                    }
+                    if kind in counts:
+                        counts[kind] += 1
+                        item["number"] = counts[kind]
+                    message["media"].append(item)
             for name in names:
+                if time.monotonic() > deadline:
+                    raise ExportError(
+                        "A validação das mídias excedeu dois minutos. Exporte um período menor."
+                    )
                 name = name.strip().strip("\u200e\u200f")
                 if not safe_name(name):
                     raise ExportError(

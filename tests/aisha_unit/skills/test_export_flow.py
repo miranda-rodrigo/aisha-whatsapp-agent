@@ -37,7 +37,7 @@ class StoreTests(unittest.IsolatedAsyncioTestCase):
                 expires = datetime.fromisoformat(rows["alice"]["expires_at"])
                 self.assertAlmostEqual(
                     (expires - datetime.now(timezone.utc)).total_seconds(),
-                    86400,
+                    3600,
                     delta=3,
                 )
                 await store.save("alice", messages[:1])
@@ -134,8 +134,11 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
         send = AsyncMock()
         with (
             patch.object(
-                store, "load", AsyncMock(return_value=[{"id": "test"}])
+                store,
+                "load_record",
+                AsyncMock(return_value={"messages": [{"id": "test"}]}),
             ) as load,
+            patch.object(store, "current", AsyncMock(return_value=True)),
             patch.object(
                 handler, "analyze", AsyncMock(return_value="Resposta")
             ) as analyze,
@@ -151,7 +154,7 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("expirado", send.call_args.args[1])
         with (
             patch.dict(os.environ, WHATSAPP_EXPORT_ENABLED="false"),
-            patch.object(store, "forget", AsyncMock()) as forget,
+            patch.object(store, "forget_with_assets", AsyncMock()) as forget,
         ):
             await handler.command("alice", "esquecer conversa", send)
             forget.assert_awaited_once_with("alice")

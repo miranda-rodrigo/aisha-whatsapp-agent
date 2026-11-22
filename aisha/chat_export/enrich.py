@@ -19,7 +19,8 @@ from .analysis import _client, source_messages, validate_analysis
 from .ingest import ExportError
 
 MAX_CONTEXT = 200_000
-_slots = asyncio.Semaphore(2)
+MAX_CONCURRENT_MEDIA = 10
+_slots = asyncio.Semaphore(MAX_CONCURRENT_MEDIA)
 
 
 async def retry(call):
@@ -83,13 +84,17 @@ async def transcribe(raw, suffix, seconds):
             if len(data) > 24 * 1024 * 1024:
                 raise ValueError("Audio chunk exceeds bound")
             response = await retry(
-                lambda: _client.with_options(
+                lambda data=data: _client.with_options(
                     timeout=120, max_retries=0
                 ).audio.transcriptions.create(
                     model=WHISPER_MODEL, file=("audio.mp3", data, "audio/mpeg")
                 )
             )
+            if not response.text.strip():
+                raise ValueError("Empty audio segment transcript")
             chunks.append(response.text.strip())
+            output.unlink()
+            del data
     text = "\n".join(chunks).strip()
     if not text:
         raise ValueError("Empty transcript")
@@ -171,7 +176,7 @@ async def comments(messages):
     return valid
 
 
-async def begin(phone, messages, fingerprint, title, question):
+async def begin(phone, messages, fingerprint, title, question, received_at=None):
     async with store.guards[phone]:
         previous = await store.load_record(phone)
         if (
@@ -180,26 +185,13 @@ async def begin(phone, messages, fingerprint, title, question):
             and previous.get("version") == 3
         ):
             return previous
-        if previous:
-            cached = {
-                item.get("hash"): item
-                for message in previous["messages"]
-                for item in message.get("media", [])
-                if item.get("status") == "ready"
-            }
-            for message in messages:
-                for item in message.get("media", []):
-                    old = cached.get(item.get("hash"), {})
-                    if old.get("transcript"):
-                        item.update(transcript=old["transcript"], status="ready")
-                    if old.get("description"):
-                        item["description"] = old["description"]
         revision = uuid.uuid4().hex
         await store.save(
             phone,
             messages,
             title=title,
             question=question,
+            received_at=received_at,
             metadata={
                 "version": 3,
                 "revision": revision,
@@ -231,6 +223,12 @@ async def run(phone, record, files):
                 groups.setdefault(item["hash"], []).append(item)
 
     async def work(digest, items):
+        try:
+            await process(digest, items)
+        finally:
+            files.pop(digest, None)
+
+    async def process(digest, items):
         first = items[0]
         cached = next((i for i in items if i.get("status") == "ready"), None)
         if cached:
@@ -264,9 +262,12 @@ async def run(phone, record, files):
                     raise ExportError("A conversa foi apagada ou substituída.")
                 if first["kind"] == "image":
                     # Display the picture even if its AI description failed.
-                    result["object"] = await assets.upload(
-                        phone, record, digest, files[digest]
-                    )
+                    try:
+                        result["object"] = await assets.upload(
+                            phone, record, digest, files[digest]
+                        )
+                    except Exception:
+                        result.update(status="failed", display_error=True)
                 for item in items:
                     item.update(result)
                 record["analysis"] = None
@@ -286,9 +287,30 @@ async def run(phone, record, files):
             raise ExportError(
                 "Texto e transcrições excedem 200 mil caracteres. Os resultados foram salvos, mas é necessário exportar um período menor; nenhuma análise parcial foi feita."
             )
-        record["status"] = "ready"
+        record["status"] = (
+            "partial"
+            if any(
+                i.get("status") != "ready"
+                for m in record["messages"]
+                for i in m.get("media", [])
+                if i["kind"] in ("audio", "image")
+            )
+            else "ready"
+        )
         await store.update(phone, record)
         return record
+    except asyncio.CancelledError:
+        for message in record["messages"]:
+            for item in message.get("media", []):
+                if item.get("status") == "pending":
+                    item["status"] = "needs_reupload"
+        record["status"] = "partial"
+        try:
+            if await store.current(phone, record):
+                await store.update(phone, record)
+        except Exception:
+            pass  # Storage failure must not prevent temporary-file cleanup.
+        raise
     finally:
         files.clear()  # Audio/ZIP are never written to persistent storage.
 
