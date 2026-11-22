@@ -1,0 +1,15 @@
+# Conversas reais e saídas geradas: nunca versionar
+data/
+conversas_brutas/
+output/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Segredos
+.env
+
+# macOS
+.DS_Store
