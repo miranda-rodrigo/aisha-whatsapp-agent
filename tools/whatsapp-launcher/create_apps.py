@@ -8,7 +8,8 @@ apps.mkdir(exist_ok=True)
 for alias in accounts:
     name = 'WA ' + alias.title()
     app = apps / (name + '.app')
-    app.mkdir(parents=True, exist_ok=True)
+    if app.exists() and not any(app.iterdir()):
+        app.rmdir()
     script = f'''on run
     do shell script "/usr/bin/python3 " & quoted form of {str(root / 'wa.py')!r} & " " & quoted form of {alias!r}
 end run'''
