@@ -1,0 +1,15 @@
+{
+  "accounts": {
+    "personal": {
+      "browser": "chrome",
+      "profile": "Default"
+    },
+    "work": {
+      "browser": "chrome",
+      "profile": "Profile 1"
+    },
+    "secondary": {
+      "browser": "safari"
+    }
+  }
+}

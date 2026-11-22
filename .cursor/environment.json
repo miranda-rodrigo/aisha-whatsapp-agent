@@ -4,7 +4,7 @@
   "terminals": [
     {
       "name": "website-dev",
-      "command": "cd website && pnpm dev"
+      "command": "cd apps/website && npx --yes pnpm@10.11.0 dev"
     }
   ]
 }
