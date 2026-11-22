@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 from .dossier import build_message_ids
@@ -105,6 +106,32 @@ def build_conversation(source: Path, objetivo: str = "") -> dict:
         "messages": messages,
         "analise": None,
     }
+
+
+def parse_chat_date(value: str) -> datetime | None:
+    """Aceita dd/mm/aa e dd/mm/aaaa, como o WhatsApp escreve nas exportações."""
+    for fmt in ("%d/%m/%y", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(value.strip(), fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def slice_since(conv: dict, since: datetime) -> dict:
+    """Cópia da conversa só com mensagens a partir de `since`, inclusive."""
+    kept = []
+    for msg in conv["messages"]:
+        day = parse_chat_date(msg.get("date") or "")
+        if day is None or day >= since:
+            kept.append(msg)
+    out = dict(conv)
+    out["messages"] = kept
+    out["recorte"] = {
+        "desde": since.strftime("%d/%m/%Y"),
+        "mensagens_total": len(conv["messages"]),
+    }
+    return out
 
 
 def conversation_path(out_dir: Path) -> Path:

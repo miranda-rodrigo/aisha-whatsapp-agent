@@ -10,7 +10,9 @@ from .model import (
     conversation_path,
     load_conversation,
     merge_layers,
+    parse_chat_date,
     save_conversation,
+    slice_since,
 )
 from .render_html import render_html
 from .render_md import render_md
@@ -21,7 +23,7 @@ def output_dir_for(source: Path, output_root: Path) -> Path:
 
 
 def build(source: Path, output_root: Path, *, nivel: int = 0, objetivo: str = "",
-          me: str | None = None, limit: int | None = None) -> Path:
+          me: str | None = None, limit: int | None = None, desde: str | None = None) -> Path:
     source = source.expanduser().resolve()
     out_dir = output_dir_for(source, output_root)
     json_path = conversation_path(out_dir)
@@ -29,6 +31,14 @@ def build(source: Path, output_root: Path, *, nivel: int = 0, objetivo: str = ""
     conv = merge_layers(build_conversation(source, objetivo), previous)
     if objetivo:
         conv["objetivo"] = objetivo
+    if desde:
+        since = parse_chat_date(desde)
+        if since is None:
+            raise SystemExit(f"Data inválida em --desde: {desde!r}. Use dd/mm/aa.")
+        conv = slice_since(conv, since)
+        recorte = conv["recorte"]
+        print(f"Recorte desde {recorte['desde']}: "
+              f"{len(conv['messages'])} de {recorte['mensagens_total']} mensagens.")
     save_conversation(conv, json_path)
 
     if nivel >= 1:

@@ -38,6 +38,19 @@
 - Validação mais forte das citações: hoje só checamos se o id existe; falta checar se a mensagem citada sustenta a frase.
 - Estado "precisa revisão" nas afirmações da análise.
 
+**Conversa com o Maurício e checagem de concorrentes (31/10, tarde):**
+- **Zap2Doc** (zap2doc.com) já faz o nosso nível 0 + 1 no Brasil: zip do WhatsApp → PDF cronológico, data/hora/autor por mensagem, imagens no lugar, áudios transcritos no lugar (modelos da OpenAI), páginas numeradas para citar na petição, SHA-256 no cabeçalho, cópia em Markdown, filtro de período, prévia grátis. R$ 19,90 por conversa com até 120 min de áudio, Pix, versão Business com lote de até 200 conversas e desconto de 15%/25%. Escreve conteúdo voltado a Juizado, Procon e "sua advogada".
+- **MinutaIA** (comprada pela Jusbrasil em 27/08/2026; R$ 100 mi de ARR, 50 mil pagantes, 180 instituições incluindo o TJSP) gera peças a partir dos autos e já tem: TranscreveIA (audiências de qualquer duração, falantes identificados, timestamps, nota de relevância 1–10, player sincronizado), Referências Rastreáveis (cada informação da minuta ligada ao documento e à página de origem), Prints do Processo (recorta a imagem da prova e insere na peça com legenda e página) e anonimização local.
+- Consequência: o fluxo "Zap2Doc gera o PDF → MinutaIA lê o PDF e escreve a peça com referência à página" já cobre boa parte do "dossiê citável". O que ainda não vimos em ninguém: comentário contextual de cada imagem/PDF da conversa, análise da conversa com citação por mensagem e HTML com camadas. Precisa ser testado se isso tem valor pago, não presumido.
+- Correção ao Maurício: as decisões relevantes sobre prova de WhatsApp são do **STJ**, não do STF, e são de processo penal (cadeia de custódia quando o Estado coleta: HC 828.054/2024, REsp 2.967.413; dúvida razoável exige perícia: Sexta Turma, fev/2026). Print de particular confirmado em juízo é aceito (AgRg AREsp 2.967.267/SC, out/2025). No cível e no trabalhista, áudio e print de interlocutor são prova lícita (CPC art. 369 e 422; TST), e impugnação genérica não derruba. Não achamos dado que confirme "queda no uso".
+- Juntada: não há formato nacional. Depende do sistema (PJe, e-SAJ, Projudi) e do tribunal; advogado junta o arquivo de mídia e cita na petição. Há vara que considera inexistente prova juntada só por link de nuvem (portaria cível de Ibiporã/PR, art. 14).
+
+**Correção do nível 2 e preparação do teste:**
+- Bug encontrado lendo o `conversa.md`: muitos comentários de áudio descreviam outro áudio (ex.: "Amigo, mas aí o contrato social?" comentado como conversa sobre saúde emocional). Causa: o modelo tinha de achar sozinho o áudio dentro da conversa inteira. Correção: `context.local_window` envia as mensagens ao redor com a mídia-alvo marcada por `>>>`, e o áudio leva a própria transcrição no pedido. 3 testes novos (27 no total).
+- Comentários refeitos: 114 mídias, ~33 s, US$ 0,63. Versão anterior guardada em `cache/comentarios_v1/` e `cache/conversa_v1.json`. Ainda há erros menores do `gpt-4o-mini` (a fatura da TIM descrita como "situação financeira", quando era comprovante de endereço; "vigência de 30 dias" em vez de "vigência dia 30").
+- A análise (nível 3) não menciona o valor final contratado (R$ 852,45). Fica como está para o teste medir o efeito; ver C2 em `AVALIACAO.md`.
+- Protocolo do teste em `AVALIACAO.md`: 12 perguntas, entradas A (txt cru), B (Zap2Doc), C (nosso md), C2 (nosso md sem análise).
+
 **Pendências:**
 - Avaliação da Fase 1 (etapa 7): 10 perguntas de resposta conhecida, `.txt` bruto vs. `conversa.md` no ChatGPT.
 - Revisão humana da qualidade: transcrições (há erros pontuais, ex. "Prigo eu spartei"), comentários e análise.

@@ -2,6 +2,7 @@
 data/
 conversas_brutas/
 output/
+docs/competidores/*.pdf
 
 # Python
 .venv/

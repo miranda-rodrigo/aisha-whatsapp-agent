@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 from urllib.parse import quote
 
+from .config import PRODUCT_NAME
+
 CSS = """
 :root {
   --desk: #1b2430;
@@ -48,6 +50,12 @@ body {
   color: #e7eef6;
   border-bottom: 1px solid rgba(255, 255, 255, .08);
   backdrop-filter: blur(8px);
+}
+.brand {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: .06em;
+  color: #d7b56d;
 }
 .bar h1 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: -.01em; }
 .bar p { margin: 2px 0 0; color: #a9b8c9; font-size: 12px; }
@@ -138,6 +146,17 @@ body.show-note .note { display: block; }
 .stamp { display: inline-block; margin-top: 6px; }
 .msg.me .stamp { color: #e4c98a; }
 .system { text-align: center; color: var(--muted); font-size: 12px; margin: 10px 20px; }
+.guide {
+  margin-bottom: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 13px;
+}
+.guide summary { cursor: pointer; font-weight: 600; }
+.guide ul { margin: 8px 0 2px; padding-left: 18px; }
+.guide li { margin: 4px 0; }
+.ai-warn { font-size: 12px; color: var(--warn-ink); background: var(--warn); border-radius: 8px; padding: 6px 8px; }
 @media (max-width: 640px) {
   .bubble { max-width: 92%; }
   .sheet { width: calc(100% - 12px); padding: 14px 10px 24px; }
@@ -196,13 +215,13 @@ def _media_block(media: dict, html_path: Path, export_dir: Path) -> str:
     else:
         chunks.append(f'<div class="file"><a href="{src}">{name}</a></div>')
     if media.get("transcricao"):
-        chunks.append('<div class="tx"><div class="kicker">Transcrição fiel</div>'
+        chunks.append('<div class="tx"><div class="kicker">Transcrição automática</div>'
                       + html.escape(media["transcricao"]) + "</div>")
     elif media.get("transcricao_erro"):
         chunks.append('<div class="omitted">Transcrição falhou: '
                       + html.escape(media["transcricao_erro"]) + "</div>")
     if media.get("comentario"):
-        chunks.append('<div class="note"><div class="kicker">Comentário</div>'
+        chunks.append('<div class="note"><div class="kicker">Comentário (IA)</div>'
                       + html.escape(media["comentario"]) + "</div>")
     chunks.append("</div>")
     return "\n".join(chunks)
@@ -212,6 +231,8 @@ def _analise(analise: dict | None) -> str:
     if not analise:
         return ""
     parts = ['<section class="analise">', "<h2>Análise</h2>",
+             '<p class="ai-warn">Gerada por IA a partir da conversa. Pode conter erros ou '
+             'omissões: confira cada item nas mensagens citadas antes de usar.</p>',
              f'<p>{html.escape(analise.get("resumo") or "")}</p>']
     titles = {
         "linha_do_tempo": "Linha do tempo",
@@ -237,6 +258,26 @@ def _analise(analise: dict | None) -> str:
     return "\n".join(parts)
 
 
+_GUIDE = """<details class="guide">
+<summary>Como ler este documento</summary>
+<ul>
+<li>A conversa vem da exportação nativa do WhatsApp, em ordem cronológica. Fotos, áudios, vídeos e PDFs aparecem na mensagem em que foram enviados.</li>
+<li>Cada mensagem tem um código (<span class="stamp">msg-…</span>). Clique nele para obter o link direto; use-o para citar a mensagem.</li>
+<li><b>Transcrição automática</b>: texto literal do áudio, sem edição. Pode errar nomes e números; o áudio original prevalece.</li>
+<li><b>Comentário (IA)</b> e <b>Análise</b>: interpretações geradas por IA. Confira nas mensagens citadas antes de usar.</li>
+<li>Os botões no topo ligam e desligam cada camada. Para perguntar a uma IA sobre a conversa, use o arquivo <code>conversa.md</code>, que traz instruções de resposta.</li>
+</ul>
+</details>"""
+
+
+def _contagem(conv: dict, n_msg: int) -> str:
+    recorte = conv.get("recorte") or {}
+    total = recorte.get("mensagens_total")
+    if total and recorte.get("desde"):
+        return (f"{n_msg} de {total} mensagens, desde {html.escape(recorte['desde'])}")
+    return f"{n_msg} mensagens"
+
+
 def render_html(conv: dict, html_path: Path, me: str | None = None) -> Path:
     html_path.parent.mkdir(parents=True, exist_ok=True)
     export_dir = Path(conv["export_dir"])
@@ -260,7 +301,7 @@ def render_html(conv: dict, html_path: Path, me: str | None = None) -> Path:
                     f'<input type="checkbox" disabled> {label} <small>— ainda não gerado</small></label>')
         return f'<label><input type="checkbox" data-layer="{layer}" checked> {label}</label>'
 
-    body = [_analise(conv.get("analise"))]
+    body = [_GUIDE, _analise(conv.get("analise"))]
     current = None
     for msg in conv["messages"]:
         if msg["date"] != current:
@@ -273,15 +314,16 @@ def render_html(conv: dict, html_path: Path, me: str | None = None) -> Path:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{html.escape(conv["chat_name"])}</title>
+<title>{html.escape(conv["chat_name"])} · {PRODUCT_NAME}</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Sora:wght@400;500;600&display=swap">
 <style>{CSS}</style>
 </head>
 <body class="{" ".join(classes)}">
 <header class="bar">
   <div>
+    <div class="brand">{PRODUCT_NAME}</div>
     <h1>{html.escape(conv["chat_name"])}</h1>
-    <p>{n_msg} mensagens · {n_audio} áudios · nível {conv.get("nivel", 0)}</p>
+    <p>{_contagem(conv, n_msg)} · {n_audio} áudios · nível {conv.get("nivel", 0)}</p>
   </div>
   <div class="toggles">
     {toggle("show-tx", "Transcrições", has_tx)}

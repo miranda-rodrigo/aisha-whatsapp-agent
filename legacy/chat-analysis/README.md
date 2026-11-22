@@ -1,4 +1,4 @@
-# wa-dossier — Dossiê de Conversas de WhatsApp
+# what_an_analysis — Dossiê de Conversas de WhatsApp
 
 Transforma a exportação de uma conversa de WhatsApp (texto + mídias) em um dossiê em Markdown
 que uma IA consegue analisar sem perder o contexto das mídias: transcrições fiéis de áudios,

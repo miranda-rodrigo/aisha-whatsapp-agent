@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .config import PRODUCT_NAME
+
 _PDF_MAX_PAGES = 3
 _PDF_MAX_CHARS = 6000
 
@@ -17,10 +19,63 @@ def _pdf_text(path: Path) -> tuple[str, int]:
     return text.strip()[:_PDF_MAX_CHARS], pages
 
 
+_INSTRUCOES = [
+    "## Como usar este documento (instruções para a IA)",
+    "",
+    "Este arquivo é o registro de uma conversa de WhatsApp, montado a partir da exportação "
+    "nativa do aplicativo. Ao responder perguntas sobre ele:",
+    "",
+    "1. Responda somente com base neste arquivo e nas fichas em `anexos/`. Se a informação "
+    "não estiver aqui, responda \"não encontrado\". Não deduza nem complete com conhecimento geral.",
+    "2. Para cada afirmação, cite a fonte: o id da mensagem (`msg-...`) e a data e hora. "
+    "Ao citar valores, prazos ou compromissos, copie o trecho literal.",
+    "3. Separe o que foi dito do que é interpretação. Só a seção \"Conversa\" contém o que "
+    "as pessoas disseram. Comentários e a seção \"Análise\" foram gerados por IA, podem "
+    "conter erros ou omissões e devem ser conferidos nas mensagens citadas.",
+    "4. Transcrições de áudio são automáticas: literais, sem edição, mas podem errar nomes "
+    "e números. O áudio original prevalece. Se um número só aparece numa transcrição, avise.",
+    "5. Se duas mensagens se contradisserem (por exemplo, um áudio e um texto), aponte as "
+    "duas, com os ids, em vez de escolher uma.",
+    "6. Dos PDFs anexados, só as primeiras páginas foram extraídas para as fichas. Não "
+    "afirme nada sobre o restante do documento.",
+    "",
+    "Estrutura: cada mensagem aparece como `- **hora remetente** (msg-id): texto`, agrupada "
+    "por data (dd/mm/aa). Mídias aparecem logo abaixo da mensagem em que foram enviadas. "
+    "\"Ausente da exportação\" significa que o arquivo não veio no zip.",
+    "",
+]
+
+
+def _recorte_md(conv: dict) -> str:
+    recorte = conv.get("recorte") or {}
+    if not recorte.get("desde"):
+        return ""
+    return (f"- Recorte: desde {recorte['desde']} "
+            f"({len(conv['messages'])} de {recorte['mensagens_total']} mensagens). "
+            "O período anterior não está neste arquivo.")
+
+
+def _resumo_midias(conv: dict) -> str:
+    counts: dict[str, int] = {}
+    ausentes = 0
+    for msg in conv["messages"]:
+        for media in msg["media"]:
+            counts[media["kind"]] = counts.get(media["kind"], 0) + 1
+            ausentes += 0 if media["present"] else 1
+        ausentes += len(msg.get("omitted") or [])
+    tx = sum(1 for m in conv["messages"] for md in m["media"] if md.get("transcricao"))
+    partes = [f"{n} {kind}" for kind, n in sorted(counts.items())]
+    return (f"- Mídias: {', '.join(partes) or 'nenhuma'} · {tx} áudios transcritos · "
+            f"{ausentes} ausentes da exportação")
+
+
 def _analise_md(analise: dict | None) -> list[str]:
     if not analise:
         return []
-    lines = ["## Análise", "", analise.get("resumo") or "", ""]
+    lines = ["## Análise", "",
+             "> Gerada por IA a partir da conversa. Pode conter erros ou omissões: "
+             "confira cada item nas mensagens citadas antes de usar.", "",
+             analise.get("resumo") or "", ""]
     titles = {"linha_do_tempo": "Linha do tempo", "valores": "Valores",
               "compromissos": "Compromissos", "pendencias": "Pendências"}
     for key, title in titles.items():
@@ -43,14 +98,19 @@ def render_md(conv: dict, out_dir: Path) -> Path:
     md_path = out_dir / "conversa.md"
 
     lines = [
-        f"# Dossiê: {conv['chat_name']}",
+        f"# {PRODUCT_NAME} · Dossiê: {conv['chat_name']}",
         "",
         f"- Mensagens: {len(conv['messages'])} · plataforma {conv['platform']}",
+    ]
+    recorte = _recorte_md(conv)
+    if recorte:
+        lines.append(recorte)
+    lines += [
+        _resumo_midias(conv),
         f"- Objetivo da análise: {conv.get('objetivo') or '(não informado)'}",
-        "- Transcrições de áudio são fiéis (nunca reescritas). Comentários e análise "
-        "são camadas geradas por IA e citam os ids `msg-...` das mensagens de origem.",
         "",
     ]
+    lines += _INSTRUCOES
     lines += _analise_md(conv.get("analise"))
     lines += ["## Conversa", ""]
 
@@ -73,7 +133,7 @@ def render_md(conv: dict, out_dir: Path) -> Path:
                 continue
             if media["kind"] == "audio":
                 if media.get("transcricao"):
-                    lines.append(f"  - Áudio `{name}` — transcrição fiel: “{media['transcricao']}”")
+                    lines.append(f"  - Áudio `{name}` — transcrição automática: “{media['transcricao']}”")
                 else:
                     lines.append(f"  - Áudio `{name}` (sem transcrição)")
             elif media["kind"] == "pdf":
@@ -85,7 +145,7 @@ def render_md(conv: dict, out_dir: Path) -> Path:
             else:
                 lines.append(f"  - {media['kind'].capitalize()} `{name}`")
             if media.get("comentario"):
-                lines.append(f"    - Comentário: {media['comentario']}")
+                lines.append(f"    - Comentário (IA): {media['comentario']}")
         for kind in msg.get("omitted") or []:
             lines.append(f"  - [{kind} citado na conversa, mas não veio na exportação]")
     lines.append("")

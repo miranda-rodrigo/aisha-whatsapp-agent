@@ -22,6 +22,7 @@ O que o advogado já paga hoje, segundo a pesquisa em `pesquisa/deep-research-re
 - Jus IA (Jusbrasil): R$ 78,90, R$ 108,90 e R$ 208,90 por mês. Já transcreve áudio de WhatsApp, um arquivo por vez.
 - Jusfy: R$ 77, R$ 117 e R$ 227 por mês. Também transcreve áudio.
 - Astrea: R$ 209 a R$ 1.249 por mês.
+- **Zap2Doc** (achado depois da pesquisa): R$ 19,90 por conversa, PDF com áudios transcritos no lugar (até 120 min), imagens, SHA-256 e cópia em Markdown. Business com 15% de desconto a partir de 10 conversas e 25% a partir de 50. É o concorrente direto dos nossos níveis 0 e 1, e derruba a ideia de cobrar R$ 59 só pela conversa transcrita.
 
 Proposta de teste vinda da pesquisa (é estimativa, não fato de mercado):
 

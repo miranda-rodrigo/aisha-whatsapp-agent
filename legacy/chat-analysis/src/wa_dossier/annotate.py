@@ -9,7 +9,7 @@ from pathlib import Path
 
 from . import costs
 from .config import LLM_MODEL, load_env
-from .context import conversation_text
+from .context import conversation_text, local_window
 
 _WORKERS = 10
 _PDF_MAX_PAGES = 3
@@ -17,9 +17,12 @@ _PDF_MAX_CHARS = 6000
 
 _SYSTEM = (
     "Você anota mídias de uma conversa de WhatsApp em português. "
+    "Comente SOMENTE a mídia indicada, que está marcada com >>> no trecho local. "
     "Escreva UM comentário curto (2 a 3 frases) explicando o que a mídia é e qual "
     "o papel dela na conversa: a que pergunta responde, o que propõe, o que muda. "
-    "Seja factual. Não invente conteúdo que não esteja visível ou no contexto. "
+    "Use as mensagens imediatamente antes e depois para entender o papel. "
+    "Seja factual. Não invente conteúdo que não esteja visível ou no contexto, nem "
+    "perguntas que ninguém fez; se o papel não for claro, diga só o que a mídia é. "
     "Não repita a transcrição. Se houver valores, nomes de planos ou condições, cite-os."
 )
 
@@ -78,7 +81,9 @@ def annotate_conversation(conv: dict, out_dir: Path, *, model: str = LLM_MODEL,
                  f"às {msg['time']} (mensagem {msg['id']}), arquivo {media['filename']}.")
         parts = [{"type": "text", "text":
                   f"Objetivo de quem pediu a análise: {objetivo}\n\n"
-                  f"Conversa completa (áudios já transcritos):\n---\n{context}\n---\n\n{where}"}]
+                  f"Conversa completa (áudios já transcritos):\n---\n{context}\n---\n\n"
+                  f"Trecho local, com a mídia a comentar marcada por >>>:\n---\n"
+                  f"{local_window(conv, msg['id'])}\n---\n\n{where}"}]
         try:
             if kind in ("image", "sticker"):
                 data = (export_dir / media["path"]).read_bytes()
@@ -95,8 +100,8 @@ def annotate_conversation(conv: dict, out_dir: Path, *, model: str = LLM_MODEL,
                     parts.append(_image_part(image, "image/png"))
             elif kind == "audio":
                 parts.append({"type": "text", "text":
-                              "É um áudio; a transcrição fiel já está no contexto acima. "
-                              "Comente apenas o papel dele na conversa."})
+                              f"É um áudio. Transcrição fiel DESTE áudio: \"{media['transcricao']}\"\n"
+                              "Comente apenas o papel dele na conversa, com base nessa transcrição."})
             else:
                 parts.append({"type": "text", "text": "Arquivo genérico; comente pelo nome e contexto."})
             resp = client.chat.completions.create(

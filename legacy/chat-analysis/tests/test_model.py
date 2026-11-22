@@ -2,13 +2,16 @@
 
 import sys
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from wa_dossier.context import local_window  # noqa: E402
 from wa_dossier.model import (  # noqa: E402
     display_text,
     merge_layers,
+    slice_since,
     strip_invalid_citations,
     validate_analise,
 )
@@ -64,6 +67,47 @@ class TestCitations(unittest.TestCase):
         texts = [item["texto"] for item in cleaned["valores"]]
         self.assertEqual(texts, ["ok", "misto"])
         self.assertEqual(cleaned["valores"][1]["mensagens"], ["msg-2"])
+
+
+class TestSliceSince(unittest.TestCase):
+    def test_keeps_from_date_inclusive(self):
+        conv = {"messages": [
+            {"date": "31/07/26", "text": "antes"},
+            {"date": "01/08/26", "text": "no dia"},
+            {"date": "02/08/2026", "text": "depois"},
+        ]}
+        sliced = slice_since(conv, datetime(2026, 8, 1))
+        self.assertEqual([m["text"] for m in sliced["messages"]], ["no dia", "depois"])
+        self.assertEqual(sliced["recorte"]["mensagens_total"], 3)
+        self.assertEqual(len(conv["messages"]), 3)
+
+
+class TestLocalWindow(unittest.TestCase):
+    def setUp(self):
+        self.conv = {"messages": [
+            {"id": f"msg-{i}", "date": "22/09/26", "time": "10:00", "sender": "Ana",
+             "is_system": False, "text": f"texto {i}", "media": []}
+            for i in range(20)
+        ]}
+        self.conv["messages"][10]["media"] = [
+            {"filename": "a.opus", "kind": "audio", "transcricao": "olá"}]
+
+    def test_marks_only_target_and_its_transcription(self):
+        window = local_window(self.conv, "msg-10", before=2, after=1)
+        marked = [line for line in window.splitlines() if line.startswith(">>> ")]
+        self.assertEqual(len(marked), 2)
+        self.assertIn("msg-10", marked[0])
+        self.assertIn("olá", marked[1])
+
+    def test_window_bounds(self):
+        window = local_window(self.conv, "msg-10", before=2, after=1)
+        self.assertIn("msg-8", window)
+        self.assertIn("msg-11", window)
+        self.assertNotIn("msg-7", window)
+        self.assertNotIn("msg-12", window)
+
+    def test_unknown_id(self):
+        self.assertEqual(local_window(self.conv, "msg-999"), "")
 
 
 if __name__ == "__main__":

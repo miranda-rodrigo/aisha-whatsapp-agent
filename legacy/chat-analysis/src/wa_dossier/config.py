@@ -10,6 +10,8 @@ from pathlib import Path
 # O substituto listado, gpt-transcribe, custa US$ 0,0045/min. O padrão continua o mini
 # enquanto a API aceitar; o código troca para gpt-transcribe se o modelo for recusado.
 # gpt-4o-mini: US$ 0,15 / US$ 0,60 por 1M tokens (entrada / saída). Aceita imagem.
+PRODUCT_NAME = "what_an_analysis"
+
 STT_MODEL = "gpt-4o-mini-transcribe"
 STT_FALLBACK = "gpt-transcribe"
 LLM_MODEL = "gpt-4o-mini"
