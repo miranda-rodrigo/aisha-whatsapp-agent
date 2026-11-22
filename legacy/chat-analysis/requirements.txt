@@ -1,2 +1,0 @@
-openai>=2.0
-pymupdf>=1.26

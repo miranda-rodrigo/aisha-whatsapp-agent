@@ -22,8 +22,8 @@ python3 -m venv .venv
 # shellcheck disable=SC1091
 . .venv/bin/activate
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 
 # Website (Next.js) dependencies.
-cd website
-pnpm install --frozen-lockfile
+cd apps/website
+npx --yes pnpm@10.11.0 install --frozen-lockfile

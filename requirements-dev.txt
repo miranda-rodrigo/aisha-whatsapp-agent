@@ -1,0 +1,4 @@
+-e ./packages/chat-analysis
+-e ./apps/agent
+-e ./apps/playground
+ruff==0.14.5
